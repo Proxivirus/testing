@@ -1,0 +1,42 @@
+{
+	"schemaVersion": 1,
+	"id": "whistle",
+	"version": "${version}",
+	"name": "Whistle",
+	"description": "Potions stack to 16",
+	"authors": [
+		"Proxi"
+	],
+	"contact": {
+		"homepage": "https://modrinth.com/mod/potion-stacking",
+		"issues": "https://github.com/Proxivirus/Potion-Stacking/issues",
+		"sources": "https://github.com/Proxivirus/Potion-Stacking"
+	},
+	"license": "MIT",
+	"icon": "assets/whistle/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		 "main": [
+			"net.whistlemod.WhistleMod"
+		]
+	},
+	"mixins": [
+	],
+	"injectors": {
+		"defaultRequire": 1
+	},
+	"depends": {
+		"fabricloader": ">=0.15.11",
+		"minecraft": ["1.21.4", "1.21.5", "1.21.6", "1.21.7", "1.21.8"],
+		"java": ">=21",
+		"fabric-api": "*"
+	},
+	"custom": {
+		"modmenu": {
+			"links": {
+				"Discord": "https://discord.gg/K6ubtsGQHT",
+				"Modrinth": "https://modrinth.com/mod/potion-stacking"
+			}
+		}
+	}
+}

@@ -1,0 +1,5 @@
+{
+  "text.autoconfig.potionstacking.option.stackSize": "Maximum stack size (default 16)",
+  "text.autoconfig.potionstacking.option.throwCooldown": "Maximum thrown potion cooldown in seconds (0 to disable)",
+  "text.autoconfig.potionstacking.title": "Potion Stacking"
+}
