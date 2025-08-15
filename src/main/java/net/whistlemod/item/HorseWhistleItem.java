@@ -1,7 +1,7 @@
 package net.whistlemod.item;
 
 import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.passive.HorseBaseEntity;
+import net.minecraft.entity.passive.AbstractHorseEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -9,8 +9,8 @@ import net.minecraft.nbt.NbtCompound;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
-import net.minecraft.util.Hand;
 import net.minecraft.util.TypedActionResult;
+import net.minecraft.util.Hand;
 import net.minecraft.world.World;
 import net.whistlemod.world.summoning.CallResult;
 import net.whistlemod.world.summoning.WhistleSummoning;
@@ -25,18 +25,18 @@ public class HorseWhistleItem extends Item {
     }
 
     @Override
-    public ActionResult useOnEntity(ItemStack stack, PlayerEntity user, LivingEntity entity, Hand hand) {
-        if (user.isSneaking() && entity instanceof HorseBaseEntity horse) {
+    public TypedActionResult useOnEntity(ItemStack stack, PlayerEntity user, LivingEntity entity, Hand hand) {
+        if (user.isSneaking() && entity instanceof AbstractHorseEntity horse) {
             if (horse.isTame() && horse.getOwnerUuid().equals(user.getUuid())) {
                 NbtCompound tag = stack.getOrCreateNbt();
                 tag.putUuid(BOUND_HORSE_KEY, horse.getUuid());
                 
                 WhistleSummoning.get(user.getServer()).bindHorse(horse);
                 user.sendMessage(Text.translatable("whistle.horse_bound"), true);
-                return ActionResult.SUCCESS;
+                return TypedActionResult.success(stack, world.isClient());
             }
         }
-        return ActionResult.PASS;
+        return TypedActionResult.pass(stack);
     }
 
     @Override

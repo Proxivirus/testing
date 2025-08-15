@@ -1,10 +1,11 @@
 package net.whistlemod.world.summoning;
 
-import net.minecraft.entity.passive.HorseBaseEntity;
+import net.minecraft.entity.passive.AbstractHorseEntity;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
+import java.util.UUID;
 
 public class StoredBoundHorse {
     private final UUID horseId;
@@ -12,8 +13,14 @@ public class StoredBoundHorse {
     private final Vec3d position;
     private final RegistryKey<World> dimension;
     private final boolean isDead;
+	private boolean isDead;
 
-    public StoredBoundHorse(HorseBaseEntity horse) {
+	// Add setter
+	public void setDead(boolean dead) {
+		isDead = dead;
+	}
+
+    public StoredBoundHorse(AbstractHorseEntity horse) {
         this.horseId = horse.getUuid();
         this.horseData = saveHorseData(horse);
         this.position = horse.getPos();
@@ -21,9 +28,9 @@ public class StoredBoundHorse {
         this.isDead = horse.isDead();
     }
 
-    private NbtCompound saveHorseData(HorseBaseEntity horse) {
+    private NbtCompound saveHorseData(AbstractHorseEntity horse) {
         NbtCompound tag = new NbtCompound();
-        horse.writeCustomDataToNbt(tag);
+        horse.writeNbt(tag);
         return tag;
     }
 

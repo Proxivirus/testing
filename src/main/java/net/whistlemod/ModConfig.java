@@ -6,7 +6,7 @@ import me.shedaniel.autoconfig.annotation.ConfigEntry;
 import net.whistlemod.world.summoning.SummonDimensionHandling;
 
 @Config(name = "whistlemod")
-public class Config implements ConfigData {
+public class ModConfig implements ConfigData {
     @ConfigEntry.Gui.Tooltip
     public int whistleMaxDistance = 10000;
 

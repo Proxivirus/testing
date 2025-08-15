@@ -13,19 +13,14 @@ import net.whistlemod.item.HorseWhistleItem;
 
 public class WhistleMod implements ModInitializer {
     public static final String MOD_ID = "whistlemod";
-    public static final Item HORSE_WHISTLE = new HorseWhistleItem(new FabricItemSettings());
-    public static Config CONFIG;
+    public static final Item HORSE_WHISTLE = new HorseWhistleItem(new Item.Settings());
+    public static ModConfig CONFIG;
 
     @Override
     public void onInitialize() {
-        // Register items
-        Registry.register(Registries.ITEM, new Identifier(MOD_ID, "horse_whistle"), HORSE_WHISTLE);
-        
-        // Initialize config
-        AutoConfig.register(Config.class, JanksonConfigSerializer::new);
-        CONFIG = AutoConfig.getConfigHolder(Config.class).getConfig();
-        
-        // Register events
+        Registry.register(Registries.ITEM, Identifier.of(MOD_ID, "horse_whistle"), HORSE_WHISTLE);
+        AutoConfig.register(ModConfig.class, JanksonConfigSerializer::new);
+        CONFIG = AutoConfig.getConfigHolder(ModConfig.class).getConfig();
         ModEvents.register();
     }
 }
