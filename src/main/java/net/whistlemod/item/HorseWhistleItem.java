@@ -9,7 +9,6 @@ import net.minecraft.nbt.NbtCompound;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
-import net.minecraft.util.TypedActionResult;
 import net.minecraft.util.Hand;
 import net.minecraft.world.World;
 import net.whistlemod.world.summoning.CallResult;
@@ -25,7 +24,7 @@ public class HorseWhistleItem extends Item {
     }
 
     @Override
-    public TypedActionResult useOnEntity(ItemStack stack, PlayerEntity user, LivingEntity entity, Hand hand) {
+    public ActionResult useOnEntity(ItemStack stack, PlayerEntity user, LivingEntity entity, Hand hand) {
         if (user.isSneaking() && entity instanceof AbstractHorseEntity horse) {
             if (horse.isTame() && horse.getOwnerUuid().equals(user.getUuid())) {
                 NbtCompound tag = stack.getOrCreateNbt();
@@ -33,14 +32,14 @@ public class HorseWhistleItem extends Item {
                 
                 WhistleSummoning.get(user.getServer()).bindHorse(horse);
                 user.sendMessage(Text.translatable("whistle.horse_bound"), true);
-                return TypedActionResult.success(stack, world.isClient());
+                return ActionResult.SUCCESS;
             }
         }
-        return TypedActionResult.pass(stack);
+        return ActionResult.PASS;
     }
 
     @Override
-    public TypedActionResult<ItemStack> use(World world, PlayerEntity user, Hand hand) {
+    public ActionResult<ItemStack> use(World world, PlayerEntity user, Hand hand) {
         ItemStack stack = user.getStackInHand(hand);
         NbtCompound tag = stack.getNbt();
         
@@ -52,9 +51,9 @@ public class HorseWhistleItem extends Item {
                 
                 handleSummonResult(user, result);
             }
-            return TypedActionResult.success(stack);
+            return ActionResult.SUCCESS;
         }
-        return TypedActionResult.pass(stack);
+        return ActionResult.PASS;
     }
 
     private void handleSummonResult(PlayerEntity player, CallResult result) {

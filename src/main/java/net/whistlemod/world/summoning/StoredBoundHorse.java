@@ -13,7 +13,6 @@ public class StoredBoundHorse {
     private final Vec3d position;
     private final RegistryKey<World> dimension;
     private final boolean isDead;
-	private boolean isDead;
 
 	// Add setter
 	public void setDead(boolean dead) {
