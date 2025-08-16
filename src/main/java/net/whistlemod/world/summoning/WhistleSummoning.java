@@ -27,6 +27,9 @@ public class WhistleSummoning extends PersistentState {
     private final Map<UUID, StoredBoundHorse> boundHorses = new HashMap<>();
     private final Set<UUID> horsesToRemove = new HashSet<>();
     private final Set<UUID> unboundHorses = new HashSet<>();
+	private static final int MAX_DISTANCE = 10000;
+    private static final SummonDimensionHandling DIMENSION_HANDLING = SummonDimensionHandling.ANY;
+    private static final String[] DIMENSIONS = new String[0];
 
     public static final Type<WhistleSummoning> TYPE = new Type<>(
         WhistleSummoning::new,
@@ -75,19 +78,18 @@ public class WhistleSummoning extends PersistentState {
         RegistryKey<World> playerDimension = player.getWorld().getRegistryKey();
         RegistryKey<World> horseDimension = boundHorse.getDimension();
         
-        return switch (WhistleMod.CONFIG.whistleDimensionHandling) {
+        return switch (DIMENSION_HANDLING) {
             case ANY -> true;
             case SAME -> playerDimension.equals(horseDimension);
-            case WHITELIST -> Arrays.asList(WhistleMod.CONFIG.whistleDimensions).contains(
+            case WHITELIST -> Arrays.asList(DIMENSIONS).contains(
                 playerDimension.getValue().toString());
-            case BLACKLIST -> !Arrays.asList(WhistleMod.CONFIG.whistleDimensions).contains(
+            case BLACKLIST -> !Arrays.asList(DIMENSIONS).contains(
                 playerDimension.getValue().toString());
         };
     }
 
     private boolean isTooFar(ServerPlayerEntity player, StoredBoundHorse boundHorse) {
-        int maxDistance = WhistleMod.CONFIG.whistleMaxDistance;
-        if (maxDistance < 0) return false;
+        if (MAX_DISTANCE < 0) return false;
         
         if (!player.getWorld().getRegistryKey().equals(boundHorse.getDimension())) {
             return true;
@@ -97,7 +99,7 @@ public class WhistleSummoning extends PersistentState {
         Vec3d horsePos = boundHorse.getPosition();
         BlockPos horseBlockPos = BlockPos.ofFloored(horsePos);
         
-        return playerPos.getSquaredDistance(horseBlockPos) > maxDistance * maxDistance;
+        return playerPos.getSquaredDistance(horseBlockPos) > MAX_DISTANCE * MAX_DISTANCE;
     }
 
     private CallResult teleportHorse(ServerPlayerEntity player, AbstractHorseEntity horse) {

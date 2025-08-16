@@ -1,7 +1,5 @@
 package net.whistlemod;
 
-import me.shedaniel.autoconfig.AutoConfig;
-import me.shedaniel.autoconfig.serializer.JanksonConfigSerializer;
 import net.fabricmc.api.ModInitializer;
 import net.minecraft.item.Item;
 import net.minecraft.registry.Registries;
@@ -15,7 +13,6 @@ import net.whistlemod.item.HorseWhistleItem;
 public class WhistleMod implements ModInitializer {
     public static final String MOD_ID = "whistlemod";
     public static Item HORSE_WHISTLE;
-    public static ModConfig CONFIG;
     
     // Create registry key before item construction
     public static final RegistryKey<Item> HORSE_WHISTLE_KEY = 
@@ -23,10 +20,6 @@ public class WhistleMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        // Initialize config first
-        AutoConfig.register(ModConfig.class, JanksonConfigSerializer::new);
-        CONFIG = AutoConfig.getConfigHolder(ModConfig.class).getConfig();
-        
         // Create settings with registry key and register item
         Item.Settings settings = new Item.Settings().registryKey(HORSE_WHISTLE_KEY);
         HORSE_WHISTLE = Registry.register(
