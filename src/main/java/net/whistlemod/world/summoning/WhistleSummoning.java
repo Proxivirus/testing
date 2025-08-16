@@ -5,17 +5,21 @@ import net.minecraft.entity.EntityType;
 import net.minecraft.entity.passive.AbstractHorseEntity;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.registry.RegistryKey;
-import net.minecraft.registry.RegistryKeys;
+import net.minecraft.registry.RegistryWrapper;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.World;
 import net.minecraft.world.PersistentState;
+import net.minecraft.entity.SpawnReason;
+import net.minecraft.world.World;
 import net.whistlemod.WhistleMod;
 import org.jetbrains.annotations.Nullable;
+import net.minecraft.network.packet.s2c.play.PositionFlag;
+import java.util.EnumSet;
+import java.util.Set;
+
 
 import java.util.*;
 
@@ -24,15 +28,20 @@ public class WhistleSummoning extends PersistentState {
     private final Set<UUID> horsesToRemove = new HashSet<>();
     private final Set<UUID> unboundHorses = new HashSet<>();
 
-    private static WhistleSummoning instance;
+    public static final Type<WhistleSummoning> TYPE = new Type<>(
+        WhistleSummoning::new,
+        WhistleSummoning::fromNbt,
+        null
+    );
 
     public static WhistleSummoning get(MinecraftServer server) {
         ServerWorld world = server.getOverworld();
         return world.getPersistentStateManager().getOrCreate(
-            type -> new WhistleSummoning(),
-            () -> new WhistleSummoning(),
-            WhistleMod.MOD_ID
+            TYPE, WhistleMod.MOD_ID
         );
+    }
+
+    public WhistleSummoning() {
     }
 
     public void bindHorse(AbstractHorseEntity horse) {
@@ -91,98 +100,101 @@ public class WhistleSummoning extends PersistentState {
         return playerPos.getSquaredDistance(horseBlockPos) > maxDistance * maxDistance;
     }
 
-	private CallResult teleportHorse(ServerPlayerEntity player, AbstractHorseEntity horse) {
-		if (!player.getWorld().getRegistryKey().equals(horse.getWorld().getRegistryKey())) {
-			ServerWorld targetLevel = player.getWorld();
-			horse.moveToWorld(targetLevel);
-		}
-		
-		horse.teleport(player.getX(), player.getY(), player.getZ());
-		horse.getNavigation().stop();
-		return CallResult.SUCCESS;
-	}
+    private CallResult teleportHorse(ServerPlayerEntity player, AbstractHorseEntity horse) {
+        ServerWorld targetLevel = (ServerWorld) player.getWorld();
+        if (!horse.getWorld().getRegistryKey().equals(targetLevel.getRegistryKey())) {
+            // Use teleport method with all required parameters
+            horse.teleport(
+                targetLevel,
+                player.getX(),
+                player.getY(),
+                player.getZ(),
+                EnumSet.allOf(PositionFlag.class), // Position flags
+                horse.getYaw(),
+                horse.getPitch(),
+                true // Dismount parameter
+            );
+        } else {
+            horse.teleport(player.getX(), player.getY(), player.getZ(), true);
+        }
+        horse.getNavigation().stop();
+        return CallResult.SUCCESS;
+    }
 
-	private CallResult summonFromStorage(ServerPlayerEntity player, StoredBoundHorse boundHorse) {
-		ServerWorld targetLevel = (ServerWorld) player.getWorld();
-		RegistryKey<World> horseDimension = boundHorse.getDimension();
-		
-		if (!player.getWorld().getRegistryKey().equals(horseDimension)) {
-			ServerWorld horseLevel = player.getServer().getWorld(horseDimension);
-			if (horseLevel == null) return CallResult.INVALID_DIMENSION;
-			
-			AbstractHorseEntity horse = createHorseFromStorage(boundHorse, horseLevel);
-			if (horse == null) return CallResult.ERROR_ENTITY_NOT_CREATED;
-			
-			horse.moveToWorld(targetLevel);
-			horse.teleport(player.getX(), player.getY(), player.getZ());
-		} else {
-			AbstractHorseEntity horse = createHorseFromStorage(boundHorse, targetLevel);
-			if (horse == null) return CallResult.ERROR_ENTITY_NOT_CREATED;
-			horse.teleport(player.getX(), player.getY(), player.getZ());
-		}
-		
-		return CallResult.SUCCESS;
-	}
+    private CallResult summonFromStorage(ServerPlayerEntity player, StoredBoundHorse boundHorse) {
+        ServerWorld targetLevel = (ServerWorld) player.getWorld();
+        RegistryKey<World> horseDimension = boundHorse.getDimension();
+        
+        if (!player.getWorld().getRegistryKey().equals(horseDimension)) {
+            ServerWorld horseLevel = player.getServer().getWorld(horseDimension);
+            if (horseLevel == null) return CallResult.INVALID_DIMENSION;
+            
+            AbstractHorseEntity horse = createHorseFromStorage(boundHorse, horseLevel);
+            if (horse == null) return CallResult.ERROR_ENTITY_NOT_CREATED;
+            
+            // Use teleport method with all required parameters
+            horse.teleport(
+                targetLevel,
+                player.getX(),
+                player.getY(),
+                player.getZ(),
+                EnumSet.allOf(PositionFlag.class), // Position flags
+                horse.getYaw(),
+                horse.getPitch(),
+                true // Dismount parameter
+            );
+        } else {
+            AbstractHorseEntity horse = createHorseFromStorage(boundHorse, targetLevel);
+            if (horse == null) return CallResult.ERROR_ENTITY_NOT_CREATED;
+            horse.teleport(player.getX(), player.getY(), player.getZ(), true);
+        }
+        
+        return CallResult.SUCCESS;
+    }
     
-	@Nullable
-	private AbstractHorseEntity createHorseFromStorage(StoredBoundHorse stored, ServerWorld level) {
-		NbtCompound tag = stored.getHorseData();
-		Entity entity = EntityType.loadEntityWithPassengers(tag, level, (e) -> e);
-		
-		if (!(entity instanceof AbstractHorseEntity horse)) return null;
-		
-		level.spawnEntity(entity);
-		return horse;
-	}
+    @Nullable
+    private AbstractHorseEntity createHorseFromStorage(StoredBoundHorse stored, ServerWorld level) {
+        NbtCompound tag = stored.getHorseData();
+        Entity entity = EntityType.loadEntityWithPassengers(tag, level, SpawnReason.SPAWN_ITEM_USE, e -> e);
+        
+        if (!(entity instanceof AbstractHorseEntity horse)) return null;
+        
+        level.spawnEntity(entity);
+        return horse;
+    }
     
-	@Nullable
-	private AbstractHorseEntity findLoadedHorse(MinecraftServer server, UUID horseId) {
-		for (ServerWorld level : server.getWorlds()) {
-			Entity entity = level.getEntity(horseId);
-			if (entity instanceof AbstractHorseEntity horse) {
-				return horse;
-			}
-		}
-		return null;
-	}
-    
+    @Nullable
+    private AbstractHorseEntity findLoadedHorse(MinecraftServer server, UUID horseId) {
+        for (ServerWorld level : server.getWorlds()) {
+            Entity entity = level.getEntity(horseId);
+            if (entity instanceof AbstractHorseEntity horse) {
+                return horse;
+            }
+        }
+        return null;
+    }
+
     @Override
-    public NbtCompound writeNbt(NbtCompound tag) {
+    public NbtCompound writeNbt(NbtCompound tag, RegistryWrapper.WrapperLookup registryLookup) {
         // Save data to NBT
         return tag;
     }
-	
-	public boolean isHorseBound(UUID horseId) {
-		return boundHorses.containsKey(horseId);
-	}
+    
+    public boolean isHorseBound(UUID horseId) {
+        return boundHorses.containsKey(horseId);
+    }
 
-	public void markHorseDead(UUID horseId) {
-		StoredBoundHorse horse = boundHorses.get(horseId);
-		if (horse != null) {
-			horse.setDead(true);
-			markDirty();
-		}
-	}
-	    public static final PersistentState.Type<WhistleSummoning> TYPE = new PersistentState.Type<>(
-        WhistleSummoning::new,
-        WhistleSummoning::fromNbt,
-        null
-    );
+    public void markHorseDead(UUID horseId) {
+        StoredBoundHorse horse = boundHorses.get(horseId);
+        if (horse != null) {
+            horse.setDead(true);
+            markDirty();
+        }
+    }
 
-    public static WhistleSummoning fromNbt(NbtCompound tag) {
+    public static WhistleSummoning fromNbt(NbtCompound tag, RegistryWrapper.WrapperLookup registryLookup) {
         WhistleSummoning data = new WhistleSummoning();
         // Load data from NBT
         return data;
-    }
-
-    @Override
-    public NbtCompound writeNbt(NbtCompound tag) {
-        // Save data to NBT
-        return tag;
-    }
-
-    public static WhistleSummoning get(MinecraftServer server) {
-        ServerWorld world = server.getOverworld();
-        return world.getPersistentStateManager().getOrCreate(TYPE, WhistleMod.MOD_ID);
     }
 }

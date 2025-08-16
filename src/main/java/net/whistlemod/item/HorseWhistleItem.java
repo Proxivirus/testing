@@ -1,5 +1,7 @@
 package net.whistlemod.item;
 
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.NbtComponent;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.passive.AbstractHorseEntity;
 import net.minecraft.entity.player.PlayerEntity;
@@ -27,8 +29,10 @@ public class HorseWhistleItem extends Item {
     public ActionResult useOnEntity(ItemStack stack, PlayerEntity user, LivingEntity entity, Hand hand) {
         if (user.isSneaking() && entity instanceof AbstractHorseEntity horse) {
             if (horse.isTame() && horse.getOwnerUuid().equals(user.getUuid())) {
-                NbtCompound tag = stack.getOrCreateNbt();
+                // Create NBT component to store horse UUID
+                NbtCompound tag = new NbtCompound();
                 tag.putUuid(BOUND_HORSE_KEY, horse.getUuid());
+                stack.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(tag));
                 
                 WhistleSummoning.get(user.getServer()).bindHorse(horse);
                 user.sendMessage(Text.translatable("whistle.horse_bound"), true);
@@ -39,19 +43,22 @@ public class HorseWhistleItem extends Item {
     }
 
     @Override
-    public ActionResult<ItemStack> use(World world, PlayerEntity user, Hand hand) {
+    public ActionResult use(World world, PlayerEntity user, Hand hand) {
         ItemStack stack = user.getStackInHand(hand);
-        NbtCompound tag = stack.getNbt();
+        NbtComponent component = stack.get(DataComponentTypes.CUSTOM_DATA);
         
-        if (tag != null && tag.containsUuid(BOUND_HORSE_KEY)) {
-            if (user instanceof ServerPlayerEntity serverPlayer) {
-                UUID horseId = tag.getUuid(BOUND_HORSE_KEY);
-                CallResult result = WhistleSummoning.get(serverPlayer.getServer())
-                                    .summonHorse(serverPlayer, horseId);
-                
-                handleSummonResult(user, result);
+        if (component != null) {
+            NbtCompound tag = component.copyNbt();
+            if (tag.containsUuid(BOUND_HORSE_KEY)) {
+                if (user instanceof ServerPlayerEntity serverPlayer) {
+                    UUID horseId = tag.getUuid(BOUND_HORSE_KEY);
+                    CallResult result = WhistleSummoning.get(serverPlayer.getServer())
+                                        .summonHorse(serverPlayer, horseId);
+                    
+                    handleSummonResult(user, result);
+                }
+                return ActionResult.SUCCESS;
             }
-            return ActionResult.SUCCESS;
         }
         return ActionResult.PASS;
     }

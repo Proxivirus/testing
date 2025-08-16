@@ -12,12 +12,7 @@ public class StoredBoundHorse {
     private final NbtCompound horseData;
     private final Vec3d position;
     private final RegistryKey<World> dimension;
-    private final boolean isDead;
-
-	// Add setter
-	public void setDead(boolean dead) {
-		isDead = dead;
-	}
+    private boolean isDead; // Removed final modifier
 
     public StoredBoundHorse(AbstractHorseEntity horse) {
         this.horseId = horse.getUuid();
@@ -39,4 +34,9 @@ public class StoredBoundHorse {
     public Vec3d getPosition() { return position; }
     public RegistryKey<World> getDimension() { return dimension; }
     public boolean isDead() { return isDead; }
+
+    // Setter for isDead
+    public void setDead(boolean dead) {
+        isDead = dead;
+    }
 }
