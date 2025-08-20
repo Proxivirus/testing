@@ -1,6 +1,6 @@
 {
 	"schemaVersion": 1,
-	"id": "whistle",
+	"id": "whistlemod",
 	"version": "${version}",
 	"name": "Whistle",
 	"description": "Potions stack to 16",
@@ -17,7 +17,7 @@
 	"environment": "*",
 	"entrypoints": {
 		 "main": [
-			"net.whistlemod.WhistleMod"
+			"com.proxi.whistle.WhistleMod"
 		]
 	},
 	"mixins": [
