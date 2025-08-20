@@ -20,6 +20,7 @@ import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
 import com.proxi.whistle.component.BoundHorseData;
 import net.minecraft.entity.passive.AbstractHorseEntity;
+import net.minecraft.entity.passive.HorseEntity;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.item.ItemStack;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
@@ -66,23 +67,22 @@ public class WhistleMod implements ModInitializer {
         WHISTLE_TICKET = ChunkTicketType.create(MOD_ID + ":whistle_ticket", Comparator.comparing(UUID::toString));
 
         // safe item registration (skip if already registered elsewhere)
-        try {
-			// Create item settings with registry key
-			Item.Settings settings = new Item.Settings().maxCount(1).registryKey(WHISTLE_KEY);
-			
-			// Create and register the item
-			WHISTLE = Registry.register(
-				Registries.ITEM,
-				WHISTLE_KEY,
-				new WhistleItem(settings)
-			);
-			// Add to creative tab
+		try {
+			Identifier whistleId = Identifier.of(MOD_ID, "whistle");
+			RegistryKey<Item> whistleKey = RegistryKey.of(RegistryKeys.ITEM, whistleId);
+
+			// attach registry key into settings first (this ensures the settings carry the ID)
+			Item.Settings settings = new Item.Settings().maxCount(1).registryKey(whistleKey);
+
+			// create the item using those settings
+			WHISTLE = Registry.register(Registries.ITEM, whistleId, new WhistleItem(settings));
+
 			ItemGroupEvents.modifyEntriesEvent(ItemGroups.TOOLS).register(content -> {
 				content.add(WHISTLE);
 			});
-        } catch (Exception e) {
-            LOGGER.info("Whistle item registration skipped or already registered: {}", e.getMessage());
-        }
+		} catch (Exception e) {
+			LOGGER.info("Whistle item registration skipped or already registered: {}", e.getMessage());
+		}
 
         // server tick handler for retry jobs
         ServerTickEvents.START_SERVER_TICK.register(this::onServerTick);
@@ -90,34 +90,51 @@ public class WhistleMod implements ModInitializer {
         LOGGER.info("WhistleMod initialized (ticket={}, item={})", WHISTLE_TICKET, WHISTLE);
 		
         // Register the entity interaction event
-        UseEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
-            if (hand != Hand.MAIN_HAND) return ActionResult.PASS;
-            ItemStack stack = player.getStackInHand(hand);
-            if (stack.getItem() instanceof WhistleItem && player.isSneaking() && entity instanceof AbstractHorseEntity) {
-                if (!world.isClient) {
-                    UUID uuid = entity.getUuid();
-                    Identifier dimensionId = entity.getWorld().getRegistryKey().getValue();
-                    BlockPos pos = entity.getBlockPos();
-                    
-                    // Get horse name and owner name
-                    String horseName = entity.getCustomName() != null ? 
-                        entity.getCustomName().getString() : 
-                        Text.translatable("entity.minecraft.horse").getString();
-                        
-                    String ownerName = "Wild";
-                    if (entity instanceof TameableEntity tameable && tameable.getOwner() != null) {
-                        if (tameable.getOwner() instanceof ServerPlayerEntity ownerPlayer) {
-                            ownerName = ownerPlayer.getGameProfile().getName() + "'s Horse";
-                        }
-                    }
-                    
-                    stack.set(ModDataComponents.BOUND_HORSE_DATA, new BoundHorseData(uuid, dimensionId, pos, horseName, ownerName));
-                    player.sendMessage(Text.translatable("item.whistlemod.whistle.bound"), true);
-                    world.playSound(null, player.getBlockPos(), SoundEvents.ITEM_TRIDENT_RETURN, SoundCategory.PLAYERS, 1.0f, 1.0f);
-                }
-                return ActionResult.SUCCESS;
-            }
-            return ActionResult.PASS;
+		UseEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
+			if (hand != Hand.MAIN_HAND) return ActionResult.PASS;
+
+			ItemStack stack = player.getStackInHand(hand);
+			boolean whistleSneakOnHorse =
+					stack.getItem() instanceof WhistleItem
+					&& player.isSneaking()
+					&& entity instanceof AbstractHorseEntity; // <- key change
+
+			if (!whistleSneakOnHorse) return ActionResult.PASS;
+
+			// From here on, we CONSUME the interaction so vanilla won't open the inven.
+			if (!world.isClient) {
+				AbstractHorseEntity horse = (AbstractHorseEntity) entity;
+
+				if (!horse.isTame()) {
+					player.sendMessage(Text.translatable("item.whistlemod.whistle.must_be_tamed"), true);
+					return ActionResult.SUCCESS; // still consume to block inventory
+				}
+
+				UUID owner = horse.getOwnerUuid();
+				if (owner == null || !owner.equals(player.getUuid())) {
+					player.sendMessage(Text.translatable("item.whistlemod.whistle.not_owner"), true);
+					return ActionResult.SUCCESS; // still consume to block inventory
+				}
+
+				UUID horseUuid = horse.getUuid();
+				Identifier dimensionId = entity.getWorld().getRegistryKey().getValue();
+				BlockPos pos = entity.getBlockPos();
+
+				String horseName = entity.getCustomName() != null
+						? entity.getCustomName().getString()
+						: Text.translatable("entity.minecraft.horse").getString();
+
+				String ownerName = player.getGameProfile().getName() + "'s Horse";
+
+				stack.set(ModDataComponents.BOUND_HORSE_DATA,
+						new BoundHorseData(horseUuid, dimensionId, pos, horseName, ownerName));
+				player.getInventory().setStack(player.getInventory().selectedSlot, stack);
+
+				player.sendMessage(Text.translatable("item.whistlemod.whistle.bound"), true);
+				world.playSound(null, player.getBlockPos(), SoundEvents.ITEM_TRIDENT_RETURN, SoundCategory.PLAYERS, 1.0f, 1.0f);
+			}
+
+			return ActionResult.SUCCESS; // <- this is what suppresses the inventory
         });
     }
 

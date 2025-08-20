@@ -9,5 +9,8 @@
   "item.whistlemod.whistle.tooltip.uuid": "UUID: %s",
   "item.whistlemod.whistle.tooltip.dimension": "Dimension: %s",
   "item.whistlemod.whistle.tooltip.position": "Position: %d, %d, %d",
-  "item.whistlemod.whistle.tooltip.chunk": "Chunk: %d, %d"
+  "item.whistlemod.whistle.tooltip.chunk": "Chunk: %d, %d",
+  "item.whistlemod.whistle.must_be_tamed": "Horse must be tamed to bind.",
+  "item.whistlemod.whistle.not_owner": "You must be the horse's owner to bind it."
+
 }

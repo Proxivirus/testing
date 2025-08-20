@@ -24,6 +24,9 @@ import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
 import net.minecraft.world.World;
 import net.minecraft.world.chunk.ChunkStatus;
+import net.minecraft.world.TeleportTarget;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.TeleportTarget.PostDimensionTransition;
 
 import org.slf4j.Logger;
 
@@ -105,8 +108,8 @@ public class WhistleItem extends Item {
         }
 
         // Fallback: use persistent storage
-        WhistleSummoningStorage storage = WhistleSummoningStorage.get(requestor);
-        Optional<WhistleSummoningStorage.StoredHorse> storedOpt = storage.get(horseUuid);
+        WhistleSummoningStorage storage = WhistleSummoningStorage.get(storedWorld);
+		Optional<WhistleSummoningStorage.StoredHorse> storedOpt = storage.get(horseUuid);
         if (storedOpt.isEmpty()) {
             LOG.warn("[SUMMON] No stored entry for UUID={}", horseUuid);
             player.sendMessage(Text.translatable("item.whistlemod.whistle.not_found"), true);
@@ -147,64 +150,61 @@ public class WhistleItem extends Item {
         return ActionResult.SUCCESS;
     }
 
-    public static void handleFoundHorseOnRetry(AbstractHorseEntity horse, ServerWorld requestorWorld, ServerPlayerEntity player) {
-        BlockPos tp = player.getBlockPos();
-        LOG.info("[SUMMON] Teleporting horse UUID={} to player {} at {}", horse.getUuid(), player.getGameProfile().getName(), tp);
+	public static void handleFoundHorseOnRetry(AbstractHorseEntity horse, ServerWorld requestorWorld, ServerPlayerEntity player) {
+		BlockPos tp = player.getBlockPos();
+		LOG.info("[SUMMON] Teleporting horse UUID={} to player {} at {}", horse.getUuid(), player.getGameProfile().getName(), tp);
 
-        if (horse.getWorld() != requestorWorld) {
-            horse.teleport(
-                    requestorWorld,
-                    tp.getX() + 0.5,
-                    tp.getY(),
-                    tp.getZ() + 0.5,
-                    Set.of(net.minecraft.network.packet.s2c.play.PositionFlag.X,
-                            net.minecraft.network.packet.s2c.play.PositionFlag.Y,
-                            net.minecraft.network.packet.s2c.play.PositionFlag.Z),
-                    player.getYaw(),
-                    player.getPitch(),
-                    true
-            );
-        } else {
-            horse.requestTeleport(tp.getX() + 0.5, tp.getY(), tp.getZ() + 0.5);
-        }
+		// Create TeleportTarget with proper constructor
+		Vec3d targetPos = new Vec3d(tp.getX() + 0.5, tp.getY(), tp.getZ() + 0.5);
+		TeleportTarget teleportTarget = new TeleportTarget(
+			requestorWorld, // Target world
+			targetPos,      // Position
+			Vec3d.ZERO,     // Velocity
+			player.getYaw(), // Yaw
+			player.getPitch(), // Pitch
+			(teleportedEntity) -> {} // The empty lambda expression that does nothing because I can't find a goddamn Yarn mappings for proper PostDimensionTransition.DO_NOTHING and I don't want a goddamn transition
+		);
+		
+		// Use the unified teleportation system
+		horse.teleportTo(teleportTarget);
+		
+		// The rest of your method remains the same...
+		ItemStack stack = player.getMainHandStack();
+		if (stack.getItem() instanceof WhistleItem) {
+			String horseName = horse.getCustomName() != null ? 
+				horse.getCustomName().getString() : 
+				Text.translatable("entity.minecraft.horse").getString();
+				
+			String ownerName = "Unknown";
+			if (horse.getOwnerUuid() != null) {
+				ServerPlayerEntity owner = player.getServer().getPlayerManager().getPlayer(horse.getOwnerUuid());
+				if (owner != null) {
+					ownerName = owner.getGameProfile().getName() + "'s Horse";
+				}
+			}
+			
+			BoundHorseData newBound = new BoundHorseData(
+				horse.getUuid(), 
+				requestorWorld.getRegistryKey().getValue(), 
+				player.getBlockPos(),
+				horseName,
+				ownerName
+			);
+			stack.set(ModDataComponents.BOUND_HORSE_DATA, newBound);
+		}
 
-        ItemStack stack = player.getMainHandStack();
-        if (stack.getItem() instanceof WhistleItem) {
-            // Get horse name and owner name for the tooltip
-            String horseName = horse.getCustomName() != null ? 
-                horse.getCustomName().getString() : 
-                Text.translatable("entity.minecraft.horse").getString();
-                
-            String ownerName = "Unknown";
-            if (horse.getOwnerUuid() != null) {
-                ServerPlayerEntity owner = player.getServer().getPlayerManager().getPlayer(horse.getOwnerUuid());
-                if (owner != null) {
-                    ownerName = owner.getGameProfile().getName() + "'s Horse";
-                }
-            }
-            
-            BoundHorseData newBound = new BoundHorseData(
-                horse.getUuid(), 
-                requestorWorld.getRegistryKey().getValue(), 
-                player.getBlockPos(),
-                horseName,
-                ownerName
-            );
-            stack.set(ModDataComponents.BOUND_HORSE_DATA, newBound);
-        }
+		try {
+			WhistleSummoningStorage storage = WhistleSummoningStorage.get(requestorWorld);
+			NbtCompound horseTag = new NbtCompound();
+			horse.saveNbt(horseTag);
+			storage.addOrUpdateFromEntity(horse, requestorWorld.getRegistryKey().getValue(), player.getBlockPos(), horseTag, horse.isDead());
+		} catch (Throwable t) {
+			LOG.warn("[SUMMON] Failed to update storage snapshot after teleport: {}", t.getMessage());
+		}
 
-        try {
-            WhistleSummoningStorage storage = WhistleSummoningStorage.get(requestorWorld);
-            NbtCompound horseTag = new NbtCompound();
-            horse.saveNbt(horseTag);
-            storage.addOrUpdateFromEntity(horse, requestorWorld.getRegistryKey().getValue(), player.getBlockPos(), horseTag, horse.isDead());
-        } catch (Throwable t) {
-            LOG.warn("[SUMMON] Failed to update storage snapshot after teleport: {}", t.getMessage());
-        }
-
-        requestorWorld.playSound(null, player.getBlockPos(), net.minecraft.sound.SoundEvents.ENTITY_HORSE_AMBIENT,
-                net.minecraft.sound.SoundCategory.PLAYERS, 1.0f, 1.0f);
-        player.getItemCooldownManager().set(player.getMainHandStack(), 200);
-        player.sendMessage(Text.translatable("item.whistlemod.whistle.summoned"), true);
-    }
+		requestorWorld.playSound(null, player.getBlockPos(), net.minecraft.sound.SoundEvents.ENTITY_HORSE_AMBIENT,
+				net.minecraft.sound.SoundCategory.PLAYERS, 1.0f, 1.0f);
+		player.getItemCooldownManager().set(player.getMainHandStack(), 200);
+		player.sendMessage(Text.translatable("item.whistlemod.whistle.summoned"), true);
+	}
 }
