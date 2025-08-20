@@ -24,6 +24,8 @@ import net.minecraft.sound.SoundCategory;
 import net.minecraft.item.ItemStack;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.minecraft.util.Hand;
+import net.minecraft.entity.passive.TameableEntity;
+import net.minecraft.server.network.ServerPlayerEntity;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -87,19 +89,32 @@ public class WhistleMod implements ModInitializer {
 
         LOGGER.info("WhistleMod initialized (ticket={}, item={})", WHISTLE_TICKET, WHISTLE);
 		
-		// Register the entity interaction event
+        // Register the entity interaction event
         UseEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
             if (hand != Hand.MAIN_HAND) return ActionResult.PASS;
             ItemStack stack = player.getStackInHand(hand);
             if (stack.getItem() instanceof WhistleItem && player.isSneaking() && entity instanceof AbstractHorseEntity) {
                 if (!world.isClient) {
-					UUID uuid = entity.getUuid();
-					Identifier dimensionId = entity.getWorld().getRegistryKey().getValue();
-					BlockPos pos = entity.getBlockPos();
-					stack.set(ModDataComponents.BOUND_HORSE_DATA, new BoundHorseData(uuid, dimensionId, pos));
-					player.sendMessage(Text.translatable("item.whistlemod.whistle.bound"), true);
-					world.playSound(null, player.getBlockPos(), SoundEvents.ITEM_TRIDENT_RETURN, SoundCategory.PLAYERS, 1.0f, 1.0f);
-				}
+                    UUID uuid = entity.getUuid();
+                    Identifier dimensionId = entity.getWorld().getRegistryKey().getValue();
+                    BlockPos pos = entity.getBlockPos();
+                    
+                    // Get horse name and owner name
+                    String horseName = entity.getCustomName() != null ? 
+                        entity.getCustomName().getString() : 
+                        Text.translatable("entity.minecraft.horse").getString();
+                        
+                    String ownerName = "Wild";
+                    if (entity instanceof TameableEntity tameable && tameable.getOwner() != null) {
+                        if (tameable.getOwner() instanceof ServerPlayerEntity ownerPlayer) {
+                            ownerName = ownerPlayer.getGameProfile().getName() + "'s Horse";
+                        }
+                    }
+                    
+                    stack.set(ModDataComponents.BOUND_HORSE_DATA, new BoundHorseData(uuid, dimensionId, pos, horseName, ownerName));
+                    player.sendMessage(Text.translatable("item.whistlemod.whistle.bound"), true);
+                    world.playSound(null, player.getBlockPos(), SoundEvents.ITEM_TRIDENT_RETURN, SoundCategory.PLAYERS, 1.0f, 1.0f);
+                }
                 return ActionResult.SUCCESS;
             }
             return ActionResult.PASS;

@@ -4,8 +4,10 @@ import com.proxi.whistle.WhistleMod;
 import com.proxi.whistle.component.BoundHorseData;
 import com.proxi.whistle.component.ModDataComponents;
 import com.proxi.whistle.world.summoning.WhistleSummoningStorage;
+import net.minecraft.item.Item.TooltipContext;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.passive.AbstractHorseEntity;
+import net.minecraft.entity.passive.HorseEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
@@ -22,8 +24,10 @@ import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
 import net.minecraft.world.World;
 import net.minecraft.world.chunk.ChunkStatus;
+
 import org.slf4j.Logger;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -41,6 +45,30 @@ public class WhistleItem extends Item {
     }
 
     @Override
+    public void appendTooltip(ItemStack stack, TooltipContext context, List<Text> tooltip, net.minecraft.item.tooltip.TooltipType type) {
+        super.appendTooltip(stack, context, tooltip, type);
+        
+        BoundHorseData bound = stack.get(ModDataComponents.BOUND_HORSE_DATA);
+        if (bound == null) {
+            tooltip.add(Text.translatable("item.whistlemod.whistle.tooltip.unbound"));
+            return;
+        }
+        
+        // Add horse information to tooltip
+        tooltip.add(Text.translatable("item.whistlemod.whistle.tooltip.bound"));
+        tooltip.add(Text.translatable("item.whistlemod.whistle.tooltip.horse_name", bound.horseName()));
+        tooltip.add(Text.translatable("item.whistlemod.whistle.tooltip.owner", bound.ownerName()));
+        tooltip.add(Text.translatable("item.whistlemod.whistle.tooltip.uuid", bound.uuid().toString()));
+        tooltip.add(Text.translatable("item.whistlemod.whistle.tooltip.dimension", bound.dimension().toString()));
+        tooltip.add(Text.translatable("item.whistlemod.whistle.tooltip.position", 
+            bound.pos().getX(), bound.pos().getY(), bound.pos().getZ()));
+        
+        ChunkPos chunkPos = new ChunkPos(bound.pos());
+        tooltip.add(Text.translatable("item.whistlemod.whistle.tooltip.chunk", 
+            chunkPos.x, chunkPos.z));
+    }
+
+    @Override
     public ActionResult use(World world, net.minecraft.entity.player.PlayerEntity user, Hand hand) {
         if (world.isClient) return ActionResult.SUCCESS;
 
@@ -50,7 +78,7 @@ public class WhistleItem extends Item {
 
         BoundHorseData bound = stack.get(ModDataComponents.BOUND_HORSE_DATA);
         if (bound == null) {
-            player.sendMessage(Text.translatable("item.whistle.whistle.unbound"), true);
+            player.sendMessage(Text.translatable("item.whistlemod.whistle.unbound"), true);
             return ActionResult.SUCCESS;
         }
 
@@ -64,7 +92,7 @@ public class WhistleItem extends Item {
         ServerWorld storedWorld = requestor.getServer().getWorld(storedKey);
         if (storedWorld == null) {
             LOG.warn("[SUMMON] stored world {} is null", bound.dimension());
-            player.sendMessage(Text.translatable("item.whistle.whistle.dimension_missing"), true);
+            player.sendMessage(Text.translatable("item.whistlemod.whistle.dimension_missing"), true);
             return ActionResult.SUCCESS;
         }
 
@@ -81,7 +109,7 @@ public class WhistleItem extends Item {
         Optional<WhistleSummoningStorage.StoredHorse> storedOpt = storage.get(horseUuid);
         if (storedOpt.isEmpty()) {
             LOG.warn("[SUMMON] No stored entry for UUID={}", horseUuid);
-            player.sendMessage(Text.translatable("item.whistle.whistle.not_found"), true);
+            player.sendMessage(Text.translatable("item.whistlemod.whistle.not_found"), true);
             return ActionResult.SUCCESS;
         }
         WhistleSummoningStorage.StoredHorse stored = storedOpt.get();
@@ -115,7 +143,7 @@ public class WhistleItem extends Item {
         );
         WhistleMod.scheduleRetry(job);
 
-        player.sendMessage(Text.translatable("item.whistle.whistle.delayed"), true);
+        player.sendMessage(Text.translatable("item.whistlemod.whistle.delayed"), true);
         return ActionResult.SUCCESS;
     }
 
@@ -142,7 +170,26 @@ public class WhistleItem extends Item {
 
         ItemStack stack = player.getMainHandStack();
         if (stack.getItem() instanceof WhistleItem) {
-            BoundHorseData newBound = new BoundHorseData(horse.getUuid(), requestorWorld.getRegistryKey().getValue(), player.getBlockPos());
+            // Get horse name and owner name for the tooltip
+            String horseName = horse.getCustomName() != null ? 
+                horse.getCustomName().getString() : 
+                Text.translatable("entity.minecraft.horse").getString();
+                
+            String ownerName = "Unknown";
+            if (horse.getOwnerUuid() != null) {
+                ServerPlayerEntity owner = player.getServer().getPlayerManager().getPlayer(horse.getOwnerUuid());
+                if (owner != null) {
+                    ownerName = owner.getGameProfile().getName() + "'s Horse";
+                }
+            }
+            
+            BoundHorseData newBound = new BoundHorseData(
+                horse.getUuid(), 
+                requestorWorld.getRegistryKey().getValue(), 
+                player.getBlockPos(),
+                horseName,
+                ownerName
+            );
             stack.set(ModDataComponents.BOUND_HORSE_DATA, newBound);
         }
 
@@ -158,6 +205,6 @@ public class WhistleItem extends Item {
         requestorWorld.playSound(null, player.getBlockPos(), net.minecraft.sound.SoundEvents.ENTITY_HORSE_AMBIENT,
                 net.minecraft.sound.SoundCategory.PLAYERS, 1.0f, 1.0f);
         player.getItemCooldownManager().set(player.getMainHandStack(), 200);
-        player.sendMessage(Text.translatable("item.whistle.whistle.summoned"), true);
+        player.sendMessage(Text.translatable("item.whistlemod.whistle.summoned"), true);
     }
 }

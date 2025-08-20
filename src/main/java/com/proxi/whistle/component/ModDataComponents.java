@@ -25,7 +25,9 @@ public class ModDataComponents {
                     instance.group(
                         Codec.STRING.xmap(UUID::fromString, UUID::toString).fieldOf("uuid").forGetter(BoundHorseData::uuid),
                         Identifier.CODEC.fieldOf("dimension").forGetter(BoundHorseData::dimension),
-                        BlockPos.CODEC.fieldOf("pos").forGetter(BoundHorseData::pos)
+                        BlockPos.CODEC.fieldOf("pos").forGetter(BoundHorseData::pos),
+                        Codec.STRING.fieldOf("horseName").forGetter(BoundHorseData::horseName),
+                        Codec.STRING.fieldOf("ownerName").forGetter(BoundHorseData::ownerName)
                     ).apply(instance, BoundHorseData::new)
                 )
             )
@@ -37,6 +39,10 @@ public class ModDataComponents {
                     BoundHorseData::dimension,
                     BlockPos.PACKET_CODEC,
                     BoundHorseData::pos,
+                    PacketCodecs.STRING,
+                    BoundHorseData::horseName,
+                    PacketCodecs.STRING,
+                    BoundHorseData::ownerName,
                     BoundHorseData::new
                 )
             )

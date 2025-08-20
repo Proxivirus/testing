@@ -1,5 +1,13 @@
 {
   "text.autoconfig.potionstacking.option.stackSize": "Maximum stack size (default 16)",
   "text.autoconfig.potionstacking.option.throwCooldown": "Maximum thrown potion cooldown in seconds (0 to disable)",
-  "text.autoconfig.potionstacking.title": "Potion Stacking"
+  "text.autoconfig.potionstacking.title": "Potion Stacking",
+  "item.whistlemod.whistle.tooltip.unbound": "No horse bound",
+  "item.whistlemod.whistle.tooltip.bound": "Bound to a horse",
+  "item.whistlemod.whistle.tooltip.horse_name": "Horse: %s",
+  "item.whistlemod.whistle.tooltip.owner": "Owner: %s",
+  "item.whistlemod.whistle.tooltip.uuid": "UUID: %s",
+  "item.whistlemod.whistle.tooltip.dimension": "Dimension: %s",
+  "item.whistlemod.whistle.tooltip.position": "Position: %d, %d, %d",
+  "item.whistlemod.whistle.tooltip.chunk": "Chunk: %d, %d"
 }
