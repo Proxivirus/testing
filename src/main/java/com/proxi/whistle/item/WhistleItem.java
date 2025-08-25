@@ -216,34 +216,55 @@ public class WhistleItem extends Item {
     }
 	
 	public static UUID readBoundUuid(NbtCompound bound) {
-		if (bound.containsUuid("UUID")) {
-			return bound.getUuid("UUID");
-		}
+		if (bound == null) return null;
+
+		// Prefer lowercase 'uuid' (what writeBindingNbt uses), but support legacy uppercase.
+		try {
+			if (bound.containsUuid("uuid")) {
+				return bound.getUuid("uuid");
+			}
+			if (bound.containsUuid("UUID")) {
+				return bound.getUuid("UUID");
+			}
+		} catch (Throwable ignored) {}
+
 		// Legacy support if split into most/least
 		if (bound.contains("UUIDMost") && bound.contains("UUIDLeast")) {
-			return new UUID(bound.getLong("UUIDMost"), bound.getLong("UUIDLeast"));
+			try {
+				return new UUID(bound.getLong("UUIDMost"), bound.getLong("UUIDLeast"));
+			} catch (Throwable ignored) {}
 		}
 		return null;
 	}
 
 
+
 	public static void tryRelink(ItemStack stack, World world) {
 		if (!(world instanceof ServerWorld serverWorld)) return;
 
-		NbtCompound nbt = stack.getNbt();
-		if (nbt == null || !nbt.contains("BoundEntity")) return;
+		// Use ItemStackNbtUtil so we don't depend on mapping-specific method names
+		NbtCompound nbt = ItemStackNbtUtil.getNbt(stack);
+		if (nbt == null) return;
 
-		NbtCompound bound = nbt.getCompound("BoundEntity");
-		if (!bound.contains("UUIDMost") || !bound.contains("UUIDLeast")) return;
+		// Support both current key and legacy key
+		NbtCompound bound = null;
+		if (nbt.contains("WhistleBoundHorse") && nbt.get("WhistleBoundHorse") instanceof NbtCompound) {
+			bound = nbt.getCompound("WhistleBoundHorse");
+		} else if (nbt.contains("BoundEntity") && nbt.get("BoundEntity") instanceof NbtCompound) {
+			bound = nbt.getCompound("BoundEntity");
+		} else {
+			return;
+		}
 
-		UUID uuid = WhistleItem.readBoundUuid(bound);
+		UUID uuid = readBoundUuid(bound);
 		if (uuid == null) return;
 
 		Entity e = serverWorld.getEntity(uuid);
 		if (e instanceof LivingEntity living && !living.isDead()) {
-			// Refresh the snapshot now — relinks to live entity
-			WhistleItem.writeBindingNbt(stack, living.getUuid(), serverWorld.getRegistryKey().getValue(), living.getBlockPos());
+			// Refresh the snapshot now — relink to live entity and update the item NBT
+			writeBindingNbt(stack, living.getUuid(), serverWorld.getRegistryKey().getValue(), living.getBlockPos());
 		}
 	}
+
 
 }
