@@ -1,210 +1,249 @@
 package com.proxi.whistle.item;
 
-import com.proxi.whistle.WhistleMod;
 import com.proxi.whistle.component.BoundHorseData;
 import com.proxi.whistle.component.ModDataComponents;
-import com.proxi.whistle.world.summoning.WhistleSummoningStorage;
-import net.minecraft.item.Item.TooltipContext;
+import com.proxi.whistle.util.ItemStackNbtUtil;
+import com.proxi.whistle.world.BoundEntityStorage;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityType;
 import net.minecraft.entity.passive.AbstractHorseEntity;
-import net.minecraft.entity.passive.HorseEntity;
+import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
-import net.minecraft.nbt.NbtCompound;
 import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerChunkManager;
 import net.minecraft.server.world.ServerWorld;
-import net.minecraft.server.world.ChunkTicketType;
+import net.minecraft.sound.SoundCategory;
+import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
-import net.minecraft.util.ActionResult;
-import net.minecraft.util.Hand;
+import net.minecraft.util.*;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
 import net.minecraft.world.World;
 import net.minecraft.world.chunk.ChunkStatus;
-import net.minecraft.world.TeleportTarget;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.TeleportTarget.PostDimensionTransition;
-
-import org.slf4j.Logger;
-
+import net.minecraft.nbt.NbtCompound;
+import net.minecraft.network.packet.s2c.play.PositionFlag;
+import net.minecraft.item.tooltip.TooltipType;
+import net.minecraft.item.Item.TooltipContext;
+import net.minecraft.util.Formatting;
+import net.minecraft.entity.LivingEntity;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
-/**
- * Whistle item: summons a bound horse.
- * Uses WhistleMod.WHISTLE_TICKET + a scheduled retry system (server ticks) to reliably load entities.
- */
 public class WhistleItem extends Item {
-    private static final Logger LOG = WhistleMod.LOGGER;
-    private static final int MAX_RETRY_TICKS = 6; // number of server ticks to retry
+
+    private static final boolean ALLOW_CROSS_DIMENSION = true;
+    private static final double MAX_SUMMON_DISTANCE = Double.POSITIVE_INFINITY;
 
     public WhistleItem(Settings settings) {
-        super(settings);
+        super(settings.maxCount(1));
     }
 
     @Override
-    public void appendTooltip(ItemStack stack, TooltipContext context, List<Text> tooltip, net.minecraft.item.tooltip.TooltipType type) {
-        super.appendTooltip(stack, context, tooltip, type);
-        
+    public ActionResult use(World world, PlayerEntity user, Hand hand) {
+        ItemStack stack = user.getStackInHand(hand);
         BoundHorseData bound = stack.get(ModDataComponents.BOUND_HORSE_DATA);
+
         if (bound == null) {
-            tooltip.add(Text.translatable("item.whistlemod.whistle.tooltip.unbound"));
-            return;
-        }
-        
-        // Add horse information to tooltip
-        tooltip.add(Text.translatable("item.whistlemod.whistle.tooltip.bound"));
-        tooltip.add(Text.translatable("item.whistlemod.whistle.tooltip.horse_name", bound.horseName()));
-        tooltip.add(Text.translatable("item.whistlemod.whistle.tooltip.owner", bound.ownerName()));
-        tooltip.add(Text.translatable("item.whistlemod.whistle.tooltip.uuid", bound.uuid().toString()));
-        tooltip.add(Text.translatable("item.whistlemod.whistle.tooltip.dimension", bound.dimension().toString()));
-        tooltip.add(Text.translatable("item.whistlemod.whistle.tooltip.position", 
-            bound.pos().getX(), bound.pos().getY(), bound.pos().getZ()));
-        
-        ChunkPos chunkPos = new ChunkPos(bound.pos());
-        tooltip.add(Text.translatable("item.whistlemod.whistle.tooltip.chunk", 
-            chunkPos.x, chunkPos.z));
-    }
-
-    @Override
-    public ActionResult use(World world, net.minecraft.entity.player.PlayerEntity user, Hand hand) {
-        if (world.isClient) return ActionResult.SUCCESS;
-
-        ServerWorld requestor = (ServerWorld) world;
-        ServerPlayerEntity player = (ServerPlayerEntity) user;
-        ItemStack stack = player.getStackInHand(hand);
-
-        BoundHorseData bound = stack.get(ModDataComponents.BOUND_HORSE_DATA);
-        if (bound == null) {
-            player.sendMessage(Text.translatable("item.whistlemod.whistle.unbound"), true);
-            return ActionResult.SUCCESS;
+            if (!world.isClient) user.sendMessage(Text.translatable("item.whistle.whistle.unbound"), true);
+            return ActionResult.FAIL;
         }
 
         UUID horseUuid = bound.uuid();
-        RegistryKey<World> storedKey = RegistryKey.of(RegistryKeys.WORLD, bound.dimension());
+        Identifier horseDimId = bound.dimension();
         BlockPos storedPos = bound.pos();
 
-        LOG.info("[USE] Player {} attempting summon for horse UUID={} storedPos={} dim={}",
-                player.getGameProfile().getName(), horseUuid, storedPos, bound.dimension());
+        if (!world.isClient) {
+            ServerWorld currentServerWorld = (ServerWorld) world;
+            RegistryKey<World> horseWorldKey = RegistryKey.of(RegistryKeys.WORLD, horseDimId);
+            ServerWorld horseWorld = currentServerWorld.getServer().getWorld(horseWorldKey);
 
-        ServerWorld storedWorld = requestor.getServer().getWorld(storedKey);
-        if (storedWorld == null) {
-            LOG.warn("[SUMMON] stored world {} is null", bound.dimension());
-            player.sendMessage(Text.translatable("item.whistlemod.whistle.dimension_missing"), true);
+            if (horseWorld == null) {
+                user.sendMessage(Text.translatable("item.whistle.whistle.dimension_missing"), true);
+                return ActionResult.FAIL;
+            }
+
+            if (!ALLOW_CROSS_DIMENSION && !horseWorld.getRegistryKey().equals(currentServerWorld.getRegistryKey())) {
+                user.sendMessage(Text.translatable("item.whistle.crossdim_disabled"), true);
+                return ActionResult.FAIL;
+            }
+
+            AbstractHorseEntity horse = null;
+            Entity maybe = horseWorld.getEntity(horseUuid);
+            if (maybe instanceof AbstractHorseEntity found) {
+                horse = found;
+            } else {
+                ChunkPos chunkPos = new ChunkPos(storedPos);
+                if (horseWorld.isChunkLoaded(chunkPos.x, chunkPos.z)) {
+                    maybe = horseWorld.getEntity(horseUuid);
+                    if (maybe instanceof AbstractHorseEntity found2) horse = found2;
+                } else {
+                    if (horseWorld == currentServerWorld) {
+                        horseWorld.getChunkManager().getChunk(chunkPos.x, chunkPos.z, ChunkStatus.FULL, true);
+                        maybe = horseWorld.getEntity(horseUuid);
+                        if (maybe instanceof AbstractHorseEntity found2) horse = found2;
+                    }
+                }
+            }
+
+            if (!horseWorld.getRegistryKey().equals(currentServerWorld.getRegistryKey())) {
+                NbtCompound snapshot = BoundEntityStorage.getSnapshotNbt(horseUuid);
+                if (snapshot == null || BoundEntityStorage.isDead(horseUuid)) {
+                    user.sendMessage(Text.translatable("item.whistle.whistle.not_found"), true);
+                    return ActionResult.FAIL;
+                }
+
+                UUID newUuid = BoundEntityStorage.recreateFromSnapshot(horseUuid, currentServerWorld, user.getX(), user.getY(), user.getZ(), user.getYaw(), user.getPitch());
+                if (newUuid == null) {
+                    user.sendMessage(Text.translatable("item.whistle.whistle.recreate_failed"), true);
+                    return ActionResult.FAIL;
+                }
+
+                BoundHorseData newData = new BoundHorseData(newUuid, currentServerWorld.getRegistryKey().getValue(), user.getBlockPos());
+                stack.set(ModDataComponents.BOUND_HORSE_DATA, newData);
+
+                // Also update client-visible NBT so the tooltip updates immediately
+                writeBindingNbt(stack, newUuid, currentServerWorld.getRegistryKey().getValue(), user.getBlockPos());
+
+                currentServerWorld.playSound(null, user.getBlockPos(), SoundEvents.ENTITY_HORSE_AMBIENT, SoundCategory.PLAYERS, 1.0f, 1.0f);
+                user.getItemCooldownManager().set(stack, 200);
+                user.sendMessage(Text.translatable("item.whistle.whistle.summoned"), true);
+                return ActionResult.SUCCESS;
+            }
+
+            if (horse != null) {
+                if (horse.getWorld() != currentServerWorld) {
+                    horse.teleport(currentServerWorld, user.getX(), user.getY(), user.getZ(),
+                            Set.of(PositionFlag.X, PositionFlag.Y, PositionFlag.Z),
+                            user.getYaw(), user.getPitch(), true);
+                } else {
+                    horse.requestTeleport(user.getX(), user.getY(), user.getZ());
+                }
+
+                BoundHorseData newData = new BoundHorseData(horseUuid, currentServerWorld.getRegistryKey().getValue(), user.getBlockPos());
+                stack.set(ModDataComponents.BOUND_HORSE_DATA, newData);
+
+                writeBindingNbt(stack, horseUuid, currentServerWorld.getRegistryKey().getValue(), user.getBlockPos());
+
+                currentServerWorld.playSound(null, user.getBlockPos(), SoundEvents.ENTITY_HORSE_AMBIENT, SoundCategory.PLAYERS, 1.0f, 1.0f);
+                user.getItemCooldownManager().set(stack, 200);
+                user.sendMessage(Text.translatable("item.whistle.whistle.summoned"), true);
+                return ActionResult.SUCCESS;
+            }
+
+            NbtCompound snapshot = BoundEntityStorage.getSnapshotNbt(horseUuid);
+            if (snapshot == null || BoundEntityStorage.isDead(horseUuid)) {
+                user.sendMessage(Text.translatable("item.whistle.whistle.not_found"), true);
+                return ActionResult.FAIL;
+            }
+
+            UUID recreated = BoundEntityStorage.recreateFromSnapshot(horseUuid, currentServerWorld, user.getX(), user.getY(), user.getZ(), user.getYaw(), user.getPitch());
+            if (recreated == null) {
+                user.sendMessage(Text.translatable("item.whistle.whistle.recreate_failed"), true);
+                return ActionResult.FAIL;
+            }
+
+            BoundHorseData newData = new BoundHorseData(recreated, currentServerWorld.getRegistryKey().getValue(), user.getBlockPos());
+            stack.set(ModDataComponents.BOUND_HORSE_DATA, newData);
+
+            writeBindingNbt(stack, recreated, currentServerWorld.getRegistryKey().getValue(), user.getBlockPos());
+
+            currentServerWorld.playSound(null, user.getBlockPos(), SoundEvents.ENTITY_HORSE_AMBIENT, SoundCategory.PLAYERS, 1.0f, 1.0f);
+            user.getItemCooldownManager().set(stack, 200);
+            user.sendMessage(Text.translatable("item.whistle.whistle.summoned"), true);
             return ActionResult.SUCCESS;
         }
 
-        // Quick direct check: maybe entity is loaded already
-        Entity e = storedWorld.getEntity(horseUuid);
-        if (e instanceof AbstractHorseEntity found) {
-            LOG.info("[SUMMON] Found horse UUID={} already loaded in world {}", horseUuid, bound.dimension());
-            handleFoundHorseOnRetry(found, requestor, player);
-            return ActionResult.SUCCESS;
-        }
-
-        // Fallback: use persistent storage
-        WhistleSummoningStorage storage = WhistleSummoningStorage.get(storedWorld);
-		Optional<WhistleSummoningStorage.StoredHorse> storedOpt = storage.get(horseUuid);
-        if (storedOpt.isEmpty()) {
-            LOG.warn("[SUMMON] No stored entry for UUID={}", horseUuid);
-            player.sendMessage(Text.translatable("item.whistlemod.whistle.not_found"), true);
-            return ActionResult.SUCCESS;
-        }
-        WhistleSummoningStorage.StoredHorse stored = storedOpt.get();
-        LOG.info("[SUMMON] Storage fallback: pos={} dim={}", stored.pos, stored.dimensionId);
-
-        // add chunk ticket (use radius/level 31 so chunk is strongly loaded)
-        ChunkPos cp = new ChunkPos(stored.pos);
-        ServerChunkManager chunkManager = storedWorld.getChunkManager();
-
-        try {
-            // pass the player UUID as the ticket argument (fourth parameter) to match generic signature
-            chunkManager.addTicket(WhistleMod.WHISTLE_TICKET, cp, 31, player.getUuid());
-            // ensure chunk is requested at FULL so chunk data and entities are prepared
-            storedWorld.getChunkManager().getChunk(cp.x, cp.z, ChunkStatus.FULL, true);
-            LOG.info("[SUMMON] Added ticket for horse {} at chunk {} (dim {})", horseUuid, cp, stored.dimensionId);
-        } catch (Throwable t) {
-            LOG.warn("[SUMMON] Failed to add ticket with level; falling back to addTicket with arg 0: {}", t.getMessage());
-            try {
-                // fallback uses arg too (player UUID)
-                chunkManager.addTicket(WhistleMod.WHISTLE_TICKET, cp, 0, player.getUuid());
-            } catch (Throwable ignored) {}
-        }
-
-        // Schedule retry job (processed by WhistleMod on next ticks)
-        WhistleMod.WhistleRetryJob job = new WhistleMod.WhistleRetryJob(
-                horseUuid,
-                player.getUuid(),
-                RegistryKey.of(RegistryKeys.WORLD, stored.dimensionId),
-                cp,
-                MAX_RETRY_TICKS
-        );
-        WhistleMod.scheduleRetry(job);
-
-        player.sendMessage(Text.translatable("item.whistlemod.whistle.delayed"), true);
-        return ActionResult.SUCCESS;
+        return ActionResult.FAIL;
     }
 
-	public static void handleFoundHorseOnRetry(AbstractHorseEntity horse, ServerWorld requestorWorld, ServerPlayerEntity player) {
-		BlockPos tp = player.getBlockPos();
-		LOG.info("[SUMMON] Teleporting horse UUID={} to player {} at {}", horse.getUuid(), player.getGameProfile().getName(), tp);
+    @Override
+    public void appendTooltip(ItemStack stack, TooltipContext context, List<Text> tooltip, TooltipType type) {
+        BoundHorseData data = stack.get(ModDataComponents.BOUND_HORSE_DATA);
+        if (data != null) {
+            UUID uuid = data.uuid();
 
-		// Create TeleportTarget with proper constructor
-		Vec3d targetPos = new Vec3d(tp.getX() + 0.5, tp.getY(), tp.getZ() + 0.5);
-		TeleportTarget teleportTarget = new TeleportTarget(
-			requestorWorld, // Target world
-			targetPos,      // Position
-			Vec3d.ZERO,     // Velocity
-			player.getYaw(), // Yaw
-			player.getPitch(), // Pitch
-			(teleportedEntity) -> {} // The empty lambda expression that does nothing because I can't find a goddamn Yarn mappings for proper PostDimensionTransition.DO_NOTHING and I don't want a goddamn transition
-		);
-		
-		// Use the unified teleportation system
-		horse.teleportTo(teleportTarget);
-		
-		// The rest of your method remains the same...
-		ItemStack stack = player.getMainHandStack();
-		if (stack.getItem() instanceof WhistleItem) {
-			String horseName = horse.getCustomName() != null ? 
-				horse.getCustomName().getString() : 
-				Text.translatable("entity.minecraft.horse").getString();
-				
-			String ownerName = "Unknown";
-			if (horse.getOwnerUuid() != null) {
-				ServerPlayerEntity owner = player.getServer().getPlayerManager().getPlayer(horse.getOwnerUuid());
-				if (owner != null) {
-					ownerName = owner.getGameProfile().getName() + "'s Horse";
-				}
-			}
-			
-			BoundHorseData newBound = new BoundHorseData(
-				horse.getUuid(), 
-				requestorWorld.getRegistryKey().getValue(), 
-				player.getBlockPos(),
-				horseName,
-				ownerName
-			);
-			stack.set(ModDataComponents.BOUND_HORSE_DATA, newBound);
+            BoundHorseData latest = BoundEntityStorage.getLatestData(uuid);
+            if (latest != null) {
+                tooltip.add(Text.literal("Dimension: " + latest.dimension()).formatted(Formatting.GRAY));
+                tooltip.add(Text.literal("Position: " + latest.pos().toShortString()).formatted(Formatting.GRAY));
+            } else {
+                NbtCompound root = ItemStackNbtUtil.getNbt(stack);
+                if (root != null && root.contains("WhistleBoundHorse")) {
+                    NbtCompound bh = root.getCompound("WhistleBoundHorse");
+                    try {
+                        String dim = bh.getString("dimension");
+                        int x = bh.getInt("x");
+                        int y = bh.getInt("y");
+                        int z = bh.getInt("z");
+                        tooltip.add(Text.literal("Dimension: " + dim).formatted(Formatting.GRAY));
+                        tooltip.add(Text.literal("Position: " + new BlockPos(x, y, z).toShortString()).formatted(Formatting.GRAY));
+                    } catch (Exception ignored) {
+                        tooltip.add(Text.literal("Dimension: " + data.dimension()).formatted(Formatting.GRAY));
+                        tooltip.add(Text.literal("Position: " + data.pos().toShortString()).formatted(Formatting.GRAY));
+                    }
+                } else {
+                    tooltip.add(Text.literal("Dimension: " + data.dimension()).formatted(Formatting.GRAY));
+                    tooltip.add(Text.literal("Position: " + data.pos().toShortString()).formatted(Formatting.GRAY));
+                }
+            }
+
+            if (BoundEntityStorage.isDead(uuid)) {
+                tooltip.add(Text.translatable("item.whistle.whistle.dead").formatted(Formatting.RED));
+            }
+
+            String offline = BoundEntityStorage.getOfflinePlayerName(uuid);
+            if (offline != null) {
+                tooltip.add(Text.literal("Ridden by (offline): " + offline).formatted(Formatting.YELLOW));
+            }
+        } else {
+            tooltip.add(Text.translatable("item.whistle.whistle.not_bound").formatted(Formatting.RED));
+        }
+    }
+
+    private static void writeBindingNbt(ItemStack stack, UUID uuid, Identifier dim, BlockPos pos) {
+        NbtCompound root = ItemStackNbtUtil.getOrCreateNbt(stack);
+        NbtCompound bh = new NbtCompound();
+        bh.putUuid("uuid", uuid);
+        bh.putString("dimension", dim.toString());
+        bh.putInt("x", pos.getX());
+        bh.putInt("y", pos.getY());
+        bh.putInt("z", pos.getZ());
+        root.put("WhistleBoundHorse", bh);
+        ItemStackNbtUtil.setNbt(stack, root);
+    }
+	
+	public static UUID readBoundUuid(NbtCompound bound) {
+		if (bound.containsUuid("UUID")) {
+			return bound.getUuid("UUID");
 		}
-
-		try {
-			WhistleSummoningStorage storage = WhistleSummoningStorage.get(requestorWorld);
-			NbtCompound horseTag = new NbtCompound();
-			horse.saveNbt(horseTag);
-			storage.addOrUpdateFromEntity(horse, requestorWorld.getRegistryKey().getValue(), player.getBlockPos(), horseTag, horse.isDead());
-		} catch (Throwable t) {
-			LOG.warn("[SUMMON] Failed to update storage snapshot after teleport: {}", t.getMessage());
+		// Legacy support if split into most/least
+		if (bound.contains("UUIDMost") && bound.contains("UUIDLeast")) {
+			return new UUID(bound.getLong("UUIDMost"), bound.getLong("UUIDLeast"));
 		}
-
-		requestorWorld.playSound(null, player.getBlockPos(), net.minecraft.sound.SoundEvents.ENTITY_HORSE_AMBIENT,
-				net.minecraft.sound.SoundCategory.PLAYERS, 1.0f, 1.0f);
-		player.getItemCooldownManager().set(player.getMainHandStack(), 200);
-		player.sendMessage(Text.translatable("item.whistlemod.whistle.summoned"), true);
+		return null;
 	}
+
+
+	public static void tryRelink(ItemStack stack, World world) {
+		if (!(world instanceof ServerWorld serverWorld)) return;
+
+		NbtCompound nbt = stack.getNbt();
+		if (nbt == null || !nbt.contains("BoundEntity")) return;
+
+		NbtCompound bound = nbt.getCompound("BoundEntity");
+		if (!bound.contains("UUIDMost") || !bound.contains("UUIDLeast")) return;
+
+		UUID uuid = WhistleItem.readBoundUuid(bound);
+		if (uuid == null) return;
+
+		Entity e = serverWorld.getEntity(uuid);
+		if (e instanceof LivingEntity living && !living.isDead()) {
+			// Refresh the snapshot now — relinks to live entity
+			WhistleItem.writeBindingNbt(stack, living.getUuid(), serverWorld.getRegistryKey().getValue(), living.getBlockPos());
+		}
+	}
+
 }

@@ -1,236 +1,191 @@
 package com.proxi.whistle;
 
-import com.proxi.whistle.item.WhistleItem;
 import com.proxi.whistle.component.ModDataComponents;
+import com.proxi.whistle.component.BoundHorseData;
+import com.proxi.whistle.item.WhistleItem;
+import com.proxi.whistle.util.ItemStackNbtUtil;
+import com.proxi.whistle.world.BoundEntityStorage;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.event.player.UseEntityCallback;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.itemgroup.v1.ItemGroupEvents;
-import net.minecraft.item.ItemGroups;
+import net.minecraft.entity.passive.AbstractHorseEntity;
 import net.minecraft.item.Item;
+import net.minecraft.item.ItemGroups;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.Registry;
-import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.world.ChunkTicketType;
-import net.minecraft.util.Identifier;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.ActionResult;
+import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
-import com.proxi.whistle.component.BoundHorseData;
-import net.minecraft.entity.passive.AbstractHorseEntity;
-import net.minecraft.entity.passive.HorseEntity;
-import net.minecraft.sound.SoundCategory;
-import net.minecraft.item.ItemStack;
-import net.fabricmc.fabric.api.event.player.UseEntityCallback;
+import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
-import net.minecraft.entity.passive.TameableEntity;
-import net.minecraft.server.network.ServerPlayerEntity;
-
+import net.minecraft.util.Identifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.util.Comparator;
-import java.util.Map;
+import net.minecraft.item.ItemStack;
+import net.minecraft.util.math.BlockPos;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.world.World;
+import net.minecraft.entity.Entity;
+import net.minecraft.nbt.NbtCompound;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.minecraft.server.MinecraftServer;
+import com.proxi.whistle.world.BoundEntityStorage;
 
-/**
- * Core mod class.
- */
+
 public class WhistleMod implements ModInitializer {
-    public static final String MOD_ID = "whistlemod";
+    public static final String MOD_ID = "whistle";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     public static final RegistryKey<Item> WHISTLE_KEY = RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "whistle"));
     public static Item WHISTLE;
 
-    // Ticket type for forced chunk loads. Initialize in onInitialize().
-    public static ChunkTicketType<UUID> WHISTLE_TICKET;
-
-    // Retry jobs map (UUID -> job)
-    static final Map<UUID, WhistleRetryJob> RETRY_JOBS = new ConcurrentHashMap<>();
-
     @Override
     public void onInitialize() {
-        LOGGER.info("Initializing WhistleMod");
+        // Initialize custom data components first
+        ModDataComponents.initialize();
 
-        // initialize components (do this at runtime)
-        try {
-            ModDataComponents.initialize();
-        } catch (Throwable t) {
-            LOGGER.warn("ModDataComponents.initialize() failed or missing: {}", t.getMessage());
-        }
-
-        // create ticket type at runtime
-        WHISTLE_TICKET = ChunkTicketType.create(MOD_ID + ":whistle_ticket", Comparator.comparing(UUID::toString));
-
-        // safe item registration (skip if already registered elsewhere)
-		try {
-			Identifier whistleId = Identifier.of(MOD_ID, "whistle");
-			RegistryKey<Item> whistleKey = RegistryKey.of(RegistryKeys.ITEM, whistleId);
-
-			// attach registry key into settings first (this ensures the settings carry the ID)
-			Item.Settings settings = new Item.Settings().maxCount(1).registryKey(whistleKey);
-
-			// create the item using those settings
-			WHISTLE = Registry.register(Registries.ITEM, whistleId, new WhistleItem(settings));
-
-			ItemGroupEvents.modifyEntriesEvent(ItemGroups.TOOLS).register(content -> {
-				content.add(WHISTLE);
-			});
-		} catch (Exception e) {
-			LOGGER.info("Whistle item registration skipped or already registered: {}", e.getMessage());
-		}
-
-        // server tick handler for retry jobs
-        ServerTickEvents.START_SERVER_TICK.register(this::onServerTick);
-
-        LOGGER.info("WhistleMod initialized (ticket={}, item={})", WHISTLE_TICKET, WHISTLE);
+        // Initialize BoundEntityStorage
+        BoundEntityStorage.init();
 		
-        // Register the entity interaction event
-		UseEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
-			if (hand != Hand.MAIN_HAND) return ActionResult.PASS;
-
-			ItemStack stack = player.getStackInHand(hand);
-			boolean whistleSneakOnHorse =
-					stack.getItem() instanceof WhistleItem
-					&& player.isSneaking()
-					&& entity instanceof AbstractHorseEntity; // <- key change
-
-			if (!whistleSneakOnHorse) return ActionResult.PASS;
-
-			// From here on, we CONSUME the interaction so vanilla won't open the inven.
-			if (!world.isClient) {
-				AbstractHorseEntity horse = (AbstractHorseEntity) entity;
-
-				if (!horse.isTame()) {
-					player.sendMessage(Text.translatable("item.whistlemod.whistle.must_be_tamed"), true);
-					return ActionResult.SUCCESS; // still consume to block inventory
-				}
-
-				UUID owner = horse.getOwnerUuid();
-				if (owner == null || !owner.equals(player.getUuid())) {
-					player.sendMessage(Text.translatable("item.whistlemod.whistle.not_owner"), true);
-					return ActionResult.SUCCESS; // still consume to block inventory
-				}
-
-				UUID horseUuid = horse.getUuid();
-				Identifier dimensionId = entity.getWorld().getRegistryKey().getValue();
-				BlockPos pos = entity.getBlockPos();
-
-				String horseName = entity.getCustomName() != null
-						? entity.getCustomName().getString()
-						: Text.translatable("entity.minecraft.horse").getString();
-
-				String ownerName = player.getGameProfile().getName() + "'s Horse";
-
-				stack.set(ModDataComponents.BOUND_HORSE_DATA,
-						new BoundHorseData(horseUuid, dimensionId, pos, horseName, ownerName));
-				player.getInventory().setStack(player.getInventory().selectedSlot, stack);
-
-				player.sendMessage(Text.translatable("item.whistlemod.whistle.bound"), true);
-				world.playSound(null, player.getBlockPos(), SoundEvents.ITEM_TRIDENT_RETURN, SoundCategory.PLAYERS, 1.0f, 1.0f);
-			}
-
-			return ActionResult.SUCCESS; // <- this is what suppresses the inventory
+        // load persisted state from world save on server start
+        ServerLifecycleEvents.SERVER_STARTED.register((MinecraftServer server) -> {
+            try {
+                BoundEntityStorage.initPersistence(server);
+                LOGGER.info("Whistle: BoundEntityStorage persistence initialized");
+            } catch (Throwable t) {
+                LOGGER.warn("Whistle: Failed to initialize BoundEntityStorage persistence", t);
+            }
         });
-    }
 
-    private void onServerTick(MinecraftServer server) {
-        if (RETRY_JOBS.isEmpty()) return;
-
-        for (UUID horseUuid : RETRY_JOBS.keySet().toArray(new UUID[0])) {
-            WhistleRetryJob job = RETRY_JOBS.get(horseUuid);
-            if (job == null) continue;
-
+        // flush state to disk on server stopping (ensures last-minute writes)
+        ServerLifecycleEvents.SERVER_STOPPING.register((MinecraftServer server) -> {
             try {
-                job.tick(server);
-                if (job.isDone()) RETRY_JOBS.remove(horseUuid);
+                BoundEntityStorage.flushToDisk();
+                LOGGER.info("Whistle: BoundEntityStorage flushed to disk");
             } catch (Throwable t) {
-                LOGGER.error("[WhistleMod] Error while processing retry job for UUID={} : {}", horseUuid, t.getMessage(), t);
-                RETRY_JOBS.remove(horseUuid);
+                LOGGER.warn("Whistle: Failed to flush BoundEntityStorage to disk", t);
             }
-        }
-    }
+        });
 
-    public static void scheduleRetry(WhistleRetryJob job) {
-        RETRY_JOBS.put(job.horseUuid, job);
-    }
+        // Create item settings with registry key
+        Item.Settings settings = new Item.Settings().maxCount(1).registryKey(WHISTLE_KEY);
 
-    public static final class WhistleRetryJob {
-        final UUID horseUuid;
-        final java.util.UUID playerUuid;
-        final net.minecraft.util.math.ChunkPos chunkPos;
-        final net.minecraft.registry.RegistryKey<net.minecraft.world.World> worldKey;
-        final int maxAttempts;
-        int attemptsLeft;
-        public boolean done = false;
+        // Create and register the item
+        WHISTLE = Registry.register(
+            Registries.ITEM,
+            WHISTLE_KEY,
+            new WhistleItem(settings)
+        );
 
-        public WhistleRetryJob(UUID horseUuid,
-                               UUID playerUuid,
-                               net.minecraft.registry.RegistryKey<net.minecraft.world.World> worldKey,
-                               net.minecraft.util.math.ChunkPos chunkPos,
-                               int maxAttempts) {
-            this.horseUuid = horseUuid;
-            this.playerUuid = playerUuid;
-            this.worldKey = worldKey;
-            this.chunkPos = chunkPos;
-            this.maxAttempts = maxAttempts;
-            this.attemptsLeft = maxAttempts;
-        }
+        // Add to creative tab
+        ItemGroupEvents.modifyEntriesEvent(ItemGroups.TOOLS).register(content -> {
+            content.add(WHISTLE);
+        });
 
-        public void tick(MinecraftServer server) {
-            if (attemptsLeft <= 0) {
-                WhistleMod.LOGGER.warn("[WhistleMod] RetryJob out of attempts for UUID={}", horseUuid);
-                cleanup(server);
-                done = true;
-                return;
+        // Re-add UseEntityCallback so sneaking-right-click with the whistle binds
+        UseEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
+            // Only main hand
+            if (hand != Hand.MAIN_HAND) return ActionResult.PASS;
+
+            ItemStack stack = player.getStackInHand(hand);
+            if (!(stack.getItem() instanceof WhistleItem)) return ActionResult.PASS;
+
+            // Only bind horses (and subclasses)
+            if (!(entity instanceof AbstractHorseEntity horseEntity)) return ActionResult.PASS;
+
+            // Only bind when sneaking
+            if (!player.isSneaking()) return ActionResult.PASS;
+
+            // Server-side binding logic
+            if (!world.isClient) {
+                UUID uuid = entity.getUuid();
+                Identifier dimensionId = entity.getWorld().getRegistryKey().getValue();
+                BlockPos pos = entity.getBlockPos();
+
+                // write the persistent component (server-side)
+                stack.set(ModDataComponents.BOUND_HORSE_DATA, new BoundHorseData(uuid, dimensionId, pos));
+
+                // Immediately snapshot the entity server-side so we can recreate it immediately
+                BoundEntityStorage.updateSnapshotFromEntity(entity);
+                BoundEntityStorage.storeSnapshot(uuid, BoundEntityStorage.getSnapshotNbt(uuid) != null ? BoundEntityStorage.getSnapshotNbt(uuid) : new NbtCompound(), dimensionId, pos);
+
+                // Also write a small client-visible NBT block on the ItemStack so the tooltip updates immediately
+                NbtCompound root = ItemStackNbtUtil.getOrCreateNbt(stack);
+                NbtCompound bh = new NbtCompound();
+                bh.putUuid("uuid", uuid);
+                bh.putString("dimension", dimensionId.toString());
+                bh.putInt("x", pos.getX());
+                bh.putInt("y", pos.getY());
+                bh.putInt("z", pos.getZ());
+                root.put("WhistleBoundHorse", bh);
+                // Make sure the stack actually stores it (some mappings need explicit setter)
+                ItemStackNbtUtil.setNbt(stack, root);
+
+                player.sendMessage(Text.translatable("item.whistle.whistle.bound"), true);
+                world.playSound(null, player.getBlockPos(), SoundEvents.ITEM_TRIDENT_RETURN, SoundCategory.PLAYERS, 1.0f, 1.0f);
+
+                // Prevent vanilla from opening the horse inventory — indicate we've handled it
+                return ActionResult.SUCCESS;
             }
 
-            attemptsLeft--;
+            // Client: return SUCCESS as well so the client doesn't open the UI
+            return ActionResult.SUCCESS;
+        });
 
-            net.minecraft.server.world.ServerWorld targetWorld = server.getWorld(worldKey);
-            if (targetWorld == null) {
-                WhistleMod.LOGGER.warn("[WhistleMod] RetryJob target world missing for UUID={} world={}", horseUuid, worldKey);
-                cleanup(server);
-                done = true;
-                return;
+        // Register entity lifecycle events
+        ServerEntityEvents.ENTITY_UNLOAD.register((entity, world) -> {
+            // Only care about living entities (horses/pets)
+            if (entity instanceof AbstractHorseEntity) {
+                // store snapshot when it unloads
+                BoundEntityStorage.onEntityUnload(entity, world);
             }
+        });
 
-            net.minecraft.entity.Entity e = targetWorld.getEntity(horseUuid);
-            if (e instanceof net.minecraft.entity.passive.AbstractHorseEntity horse) {
-                WhistleMod.LOGGER.info("[WhistleMod] RetryJob found horse UUID={} in world {} (attemptsLeft={})", horseUuid, worldKey, attemptsLeft);
-                net.minecraft.server.network.ServerPlayerEntity player = server.getPlayerManager().getPlayer(playerUuid);
-                if (player != null) {
-                    com.proxi.whistle.item.WhistleItem.handleFoundHorseOnRetry(horse, targetWorld, player);
-                } else {
-                    WhistleMod.LOGGER.warn("[WhistleMod] Cannot notify/teleport because player {} is offline", playerUuid);
+        ServerEntityEvents.ENTITY_LOAD.register((entity, world) -> {
+            BoundEntityStorage.onEntityLoad(entity, world);
+        });
+
+        // Death event for living entities
+        ServerLivingEntityEvents.AFTER_DEATH.register((livingEntity, damageSource) -> {
+            if (livingEntity instanceof AbstractHorseEntity) {
+                BoundEntityStorage.markDead(livingEntity.getUuid());
+            }
+        });
+
+        // Player disconnect: check if they logged out while riding a bound entity
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+            ServerPlayerEntity player = handler.player;
+            if (player == null) return;
+            Entity vehicle = player.getVehicle();
+            if (vehicle instanceof AbstractHorseEntity horse) {
+                UUID horseId = horse.getUuid();
+                if (BoundEntityStorage.isBound(horseId)) {
+                    BoundEntityStorage.markWithOfflinePlayer(horseId, player.getName().getString());
                 }
-                cleanup(server);
-                done = true;
-                return;
-            } else {
-                WhistleMod.LOGGER.info("[WhistleMod] RetryJob: horse UUID={} not present yet (attemptsLeft={})", horseUuid, attemptsLeft);
             }
-        }
+        });
 
-        private void cleanup(MinecraftServer server) {
+        // Server tick: once per second refresh loaded entity snapshots
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
             try {
-                net.minecraft.server.world.ServerWorld targetWorld = server.getWorld(worldKey);
-                if (targetWorld != null) {
-                    // call removeTicket with the same argument we used to add the ticket
-                    targetWorld.getChunkManager().removeTicket(WHISTLE_TICKET, chunkPos, 31, playerUuid);
-                    WhistleMod.LOGGER.info("[WhistleMod] removed ticket for chunk {} (cleanup)", chunkPos);
+                if (server.getTicks() % 20 == 0) {
+                    BoundEntityStorage.tick(server);
                 }
             } catch (Throwable t) {
-                WhistleMod.LOGGER.warn("[WhistleMod] Failed to remove ticket during cleanup: {}", t.getMessage());
+                LOGGER.warn("BoundEntityStorage tick failed: ", t);
             }
-        }
+        });
 
-        public boolean isDone() {
-            return done;
-        }
+        LOGGER.info("Horse Whistle Mod initialized!");
+        LOGGER.info("Registered item: " + Registries.ITEM.getId(WHISTLE));
     }
 }

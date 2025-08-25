@@ -1,6 +1,6 @@
 {
 	"schemaVersion": 1,
-	"id": "whistlemod",
+	"id": "whistle",
 	"version": "${version}",
 	"name": "Whistle",
 	"description": "Potions stack to 16",
@@ -16,12 +16,17 @@
 	"icon": "assets/whistle/icon.png",
 	"environment": "*",
 	"entrypoints": {
-		 "main": [
+		"main": [
 			"com.proxi.whistle.WhistleMod"
+		],
+		"client": [
+			"com.proxi.whistle.WhistleClient"
 		]
 	},
 	"mixins": [
+		"whistle.mixins.json"
 	],
+
 	"injectors": {
 		"defaultRequire": 1
 	},
