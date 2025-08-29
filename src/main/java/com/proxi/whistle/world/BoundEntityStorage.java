@@ -163,7 +163,6 @@ public final class BoundEntityStorage {
                 ent.putInt("z", s.pos != null ? s.pos.getZ() : 0);
                 ent.putBoolean("loaded", s.loaded);
                 ent.putBoolean("dead", s.dead);
-                ent.putLong("lastUpdated", s.lastUpdatedTick);
                 String offline = withOfflinePlayer.get(id);
                 if (offline != null) ent.putString("offlinePlayer", offline);
                 entries.add(ent);
@@ -216,7 +215,8 @@ public final class BoundEntityStorage {
                         Snapshot s = new Snapshot(nbt, dim, new BlockPos(x, y, z));
                         s.loaded = ent.getBoolean("loaded");
                         s.dead = ent.getBoolean("dead");
-                        s.lastUpdatedTick = ent.contains("lastUpdated") ? ent.getLong("lastUpdated") : 0L;
+						// NEW: do not carry process tick counters across saves
+						s.lastUpdatedTick = 0L;
                         snapshots.put(id, s);
                         if (ent.contains("offlinePlayer")) {
                             withOfflinePlayer.put(id, ent.getString("offlinePlayer"));
@@ -448,8 +448,11 @@ public final class BoundEntityStorage {
             UUID uuid = e.getKey();
             Snapshot s = e.getValue();
 
-            if (tick - s.lastUpdatedTick < 20) continue;
-            s.lastUpdatedTick = tick;
+			// NEW: handle server restarts (tick counter resets)
+			long diff = tick - s.lastUpdatedTick;
+			// Update if it's been >= 20 ticks OR if diff went negative (server restarted)
+			if (diff < 0 || diff < 20) continue;
+			s.lastUpdatedTick = tick;
 
             if (s.dimension == null) continue;
             RegistryKey<World> worldKey = RegistryKey.of(RegistryKeys.WORLD, s.dimension);
