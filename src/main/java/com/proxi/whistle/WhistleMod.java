@@ -39,7 +39,14 @@ import net.minecraft.nbt.NbtCompound;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.server.MinecraftServer;
 import com.proxi.whistle.world.BoundEntityStorage;
-
+import net.minecraft.network.packet.s2c.common.CustomPayloadS2CPacket;
+import net.minecraft.network.codec.PacketCodecs;
+import net.minecraft.network.packet.CustomPayload;
+import net.minecraft.network.codec.PacketCodec;
+import net.minecraft.network.codec.PacketCodecs;
+import net.minecraft.network.PacketByteBuf;
+import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+import com.proxi.whistle.network.HorseSyncPayload;
 
 public class WhistleMod implements ModInitializer {
     public static final String MOD_ID = "whistle";
@@ -47,6 +54,8 @@ public class WhistleMod implements ModInitializer {
 
     public static final RegistryKey<Item> WHISTLE_KEY = RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "whistle"));
     public static Item WHISTLE;
+	
+	public static final Identifier HORSE_SYNC_PACKET = Identifier.of(MOD_ID, "horse_sync");
 
     @Override
     public void onInitialize() {
@@ -55,6 +64,12 @@ public class WhistleMod implements ModInitializer {
 
         // Initialize BoundEntityStorage
         BoundEntityStorage.init();
+		
+		// Register networking payload
+		PayloadTypeRegistry.playS2C().register(
+			com.proxi.whistle.network.HorseSyncPayload.ID,
+			com.proxi.whistle.network.HorseSyncPayload.CODEC
+		);
 		
         // load persisted state from world save on server start
         ServerLifecycleEvents.SERVER_STARTED.register((MinecraftServer server) -> {

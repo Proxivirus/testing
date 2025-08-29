@@ -20,6 +20,17 @@ import net.minecraft.registry.RegistryKeys;
 import net.minecraft.util.WorldSavePath;
 import net.minecraft.world.World;
 import net.minecraft.nbt.NbtSizeTracker;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.network.PacketByteBuf;
+import com.proxi.whistle.WhistleMod;
+import com.proxi.whistle.component.ModDataComponents;
+import net.minecraft.item.ItemStack;
+import com.proxi.whistle.item.WhistleItem;
+import net.minecraft.server.network.ServerPlayerEntity;
+import com.proxi.whistle.network.HorseSyncPayload;
+import com.proxi.whistle.component.BoundHorseData;
+
+import io.netty.buffer.Unpooled;
 
 import java.io.File;
 import java.io.IOException;
@@ -488,6 +499,68 @@ public final class BoundEntityStorage {
                     s.loaded = true;
                     s.dead = false;
                     markDirty();
+					
+					// send sync packets to players holding a matching whistle
+					for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+						WhistleMod.LOGGER.info("[Whistle] checking player: {}", player.getName().getString());
+						for (int slot = 0; slot < player.getInventory().size(); slot++) {
+							ItemStack stack = player.getInventory().getStack(slot);
+							if (stack == null || stack.isEmpty()) continue;
+							if (!(stack.getItem() instanceof com.proxi.whistle.item.WhistleItem)) continue;
+
+							// Try component first
+							com.proxi.whistle.component.BoundHorseData comp =
+									stack.get(com.proxi.whistle.component.ModDataComponents.BOUND_HORSE_DATA);
+							UUID targetUuid = null;
+							if (comp != null) {
+								targetUuid = comp.uuid();
+								WhistleMod.LOGGER.info("[Whistle] player={} slot={} component UUID={}", player.getName().getString(), slot, targetUuid);
+							} else {
+								net.minecraft.nbt.NbtCompound root = com.proxi.whistle.util.ItemStackNbtUtil.getNbt(stack);
+								if (root != null && root.contains("WhistleBoundHorse") && root.get("WhistleBoundHorse") instanceof net.minecraft.nbt.NbtCompound) {
+									net.minecraft.nbt.NbtCompound bh = root.getCompound("WhistleBoundHorse");
+									UUID maybe = com.proxi.whistle.item.WhistleItem.readBoundUuid(bh);
+									if (maybe != null) {
+										targetUuid = maybe;
+										WhistleMod.LOGGER.info("[Whistle] player={} slot={} NBT UUID={}", player.getName().getString(), slot, targetUuid);
+									} else {
+										WhistleMod.LOGGER.info("[Whistle] player={} slot={} WhistleBoundHorse present but UUID parsing failed", player.getName().getString(), slot);
+									}
+								} else if (root != null && root.contains("BoundEntity") && root.get("BoundEntity") instanceof net.minecraft.nbt.NbtCompound) {
+									net.minecraft.nbt.NbtCompound bh = root.getCompound("BoundEntity");
+									UUID maybe = com.proxi.whistle.item.WhistleItem.readBoundUuid(bh);
+									if (maybe != null) {
+										targetUuid = maybe;
+										WhistleMod.LOGGER.info("[Whistle] player={} slot={} legacy BoundEntity NBT UUID={}", player.getName().getString(), slot, targetUuid);
+									} else {
+										WhistleMod.LOGGER.info("[Whistle] player={} slot={} BoundEntity present but UUID parsing failed", player.getName().getString(), slot);
+									}
+								} else {
+									WhistleMod.LOGGER.info("[Whistle] player={} slot={} no component and no WhistleBoundHorse/BoundEntity NBT", player.getName().getString(), slot);
+								}
+							}
+
+							// log our candidate match decision
+							if (targetUuid == null) {
+								// nothing matched for this stack
+								continue;
+							}
+
+							WhistleMod.LOGGER.info("[Whistle] comparing item uuid {} to snapshot uuid {}", targetUuid, uuid);
+							if (targetUuid.equals(uuid)) {
+								WhistleMod.LOGGER.info("[Whistle] SENDING horse-sync -> player={} slot={} uuid={}", player.getName().getString(), slot, uuid);
+								com.proxi.whistle.network.HorseSyncPayload payload =
+										new com.proxi.whistle.network.HorseSyncPayload(slot, uuid, s.dimension, s.pos);
+								try {
+									net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player, payload);
+								} catch (Throwable t) {
+									WhistleMod.LOGGER.warn("[Whistle] failed to send payload to {}: {}", player.getName().getString(), t.toString());
+								}
+							} else {
+								WhistleMod.LOGGER.info("[Whistle] uuid mismatch for player={} slot={} (item {}) != snapshot {}", player.getName().getString(), slot, targetUuid, uuid);
+							}
+						}
+					}
                 } catch (Throwable ignored) {}
             } else {
                 s.loaded = false;
