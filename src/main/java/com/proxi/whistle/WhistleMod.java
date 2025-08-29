@@ -174,6 +174,42 @@ public class WhistleMod implements ModInitializer {
             }
         });
 
+		// When a player joins back, clear any offline rider markers for them so the tooltip stops showing offline status
+		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+			ServerPlayerEntity player = handler.player;
+			if (player == null) return;
+			String name = player.getName().getString();
+			BoundEntityStorage.clearOfflineForPlayerName(name);
+
+			// also clear client-side offlinePlayer NBT on whistles so the tooltip clears immediately
+			for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+				for (int i = 0; i < p.getInventory().size(); i++) {
+					ItemStack s = p.getInventory().getStack(i);
+					if (s == null || s.isEmpty()) continue;
+					if (!(s.getItem() instanceof WhistleItem)) continue;
+
+					NbtCompound root = ItemStackNbtUtil.getNbt(s);
+					if (root == null) continue;
+					NbtCompound bound = root.contains("WhistleBoundHorse") && root.get("WhistleBoundHorse") instanceof NbtCompound
+							? root.getCompound("WhistleBoundHorse")
+							: (root.contains("BoundEntity") && root.get("BoundEntity") instanceof NbtCompound ? root.getCompound("BoundEntity") : null);
+					if (bound == null) continue;
+
+					// if this whistle referenced the returning player, remove offlinePlayer
+					if (bound.contains("offlinePlayer") && name.equals(bound.getString("offlinePlayer"))) {
+						NbtCompound bh = bound.copy();
+						bh.remove("offlinePlayer");
+						root.put("WhistleBoundHorse", bh);
+						ItemStackNbtUtil.setNbt(s, root);
+						p.getInventory().setStack(i, s);
+						try {
+							p.networkHandler.sendPacket(p.getInventory().createSlotSetPacket(i));
+						} catch (Throwable ignored) {}
+					}
+				}
+			}
+		});
+
         // Server tick: once per second refresh loaded entity snapshots
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             try {

@@ -30,6 +30,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
+import java.util.Iterator;
 
 /**
  * BoundEntityStorage
@@ -354,6 +355,24 @@ public final class BoundEntityStorage {
         withOfflinePlayer.put(uuid, playerName);
         markDirty();
     }
+	
+	/**
+	 * Clear any offline-player markers that reference the given player name.
+	 * Called when a player rejoins so the "Ridden by (offline): <name>" tooltip can be cleared.
+	 */
+	public static void clearOfflineForPlayerName(String playerName) {
+		if (playerName == null) return;
+		boolean changed = false;
+		Iterator<Map.Entry<UUID, String>> it = withOfflinePlayer.entrySet().iterator();
+		while (it.hasNext()) {
+			Map.Entry<UUID, String> e = it.next();
+			if (playerName.equals(e.getValue())) {
+				it.remove();
+				changed = true;
+			}
+		}
+		if (changed) markDirty();
+	}
 
     public static String getOfflinePlayerName(UUID uuid) {
         return withOfflinePlayer.get(uuid);
