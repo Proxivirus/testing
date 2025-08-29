@@ -1,5 +1,9 @@
 {
-  "text.autoconfig.potionstacking.option.stackSize": "Maximum stack size (default 16)",
-  "text.autoconfig.potionstacking.option.throwCooldown": "Maximum thrown potion cooldown in seconds (0 to disable)",
-  "text.autoconfig.potionstacking.title": "Potion Stacking"
+  "item.whistle.whistle.unbound": "Whistle not bound",
+  "item.whistle.whistle.bound": "Whistle successfully bound",
+  "item.whistle.crossdim_disabled": "Summoning across dimensions is not allowed",
+  "item.whistle.whistle.not_found": "Bound entity not found (Report to developer)",
+  "item.whistle.whistle.recreate_failed": "Bound entity could not be created (Report to developer)",
+  "item.whistle.whistle.summoned": "Successfully summoned",
+  "item.whistle.whistle.dead": "Entity cannot be summoned, it's dead."
 }
