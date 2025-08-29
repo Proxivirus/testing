@@ -111,6 +111,19 @@ public class WhistleMod implements ModInitializer {
                 Identifier dimensionId = entity.getWorld().getRegistryKey().getValue();
                 BlockPos pos = entity.getBlockPos();
 
+				AbstractHorseEntity horse = (AbstractHorseEntity) entity;
+
+				if (!horse.isTame()) {
+					player.sendMessage(Text.translatable("item.whistlemod.whistle.must_be_tamed"), true);
+					return ActionResult.SUCCESS; // still consume to block inventory
+				}
+
+				UUID owner = horse.getOwnerUuid();
+				if (owner == null || !owner.equals(player.getUuid())) {
+					player.sendMessage(Text.translatable("item.whistlemod.whistle.not_owner"), true);
+					return ActionResult.SUCCESS; // still consume to block inventory
+				}
+
                 // write the persistent component (server-side)
                 stack.set(ModDataComponents.BOUND_HORSE_DATA, new BoundHorseData(uuid, dimensionId, pos));
 
