@@ -236,35 +236,4 @@ public class WhistleItem extends Item {
 		}
 		return null;
 	}
-
-
-
-	public static void tryRelink(ItemStack stack, World world) {
-		if (!(world instanceof ServerWorld serverWorld)) return;
-
-		// Use ItemStackNbtUtil so we don't depend on mapping-specific method names
-		NbtCompound nbt = ItemStackNbtUtil.getNbt(stack);
-		if (nbt == null) return;
-
-		// Support both current key and legacy key
-		NbtCompound bound = null;
-		if (nbt.contains("WhistleBoundHorse") && nbt.get("WhistleBoundHorse") instanceof NbtCompound) {
-			bound = nbt.getCompound("WhistleBoundHorse");
-		} else if (nbt.contains("BoundEntity") && nbt.get("BoundEntity") instanceof NbtCompound) {
-			bound = nbt.getCompound("BoundEntity");
-		} else {
-			return;
-		}
-
-		UUID uuid = readBoundUuid(bound);
-		if (uuid == null) return;
-
-		Entity e = serverWorld.getEntity(uuid);
-		if (e instanceof LivingEntity living && !living.isDead()) {
-			// Refresh the snapshot now — relink to live entity and update the item NBT
-			writeBindingNbt(stack, living.getUuid(), serverWorld.getRegistryKey().getValue(), living.getBlockPos());
-		}
-	}
-
-
 }
